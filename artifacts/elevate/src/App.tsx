@@ -565,9 +565,9 @@ function ElevateApp() {
               className="text-lg md:text-xl text-muted-foreground font-sans max-w-xl mx-auto leading-relaxed"
               data-testid="text-landing-subhead"
             >
-              No endless surveys, no complex dashboards. Just a quick
-              conversation to discover exactly what to hand off, who should
-              take it, and what you get back.
+              Burned out by the endless side tasks? Confused about where to
+              hand off what exactly? Discover the potential hiding behind all
+              that lost time.
             </p>
             <div className="pt-8">
               <Button
