@@ -3,13 +3,15 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Elevate Delegation Intelligence API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: conversation
+    description: Conversational intake and analysis
 paths:
   /healthz:
     get:
@@ -24,6 +26,86 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /conversation/start:
+    post:
+      operationId: startConversation
+      tags: [conversation]
+      summary: Start a new conversation session
+      description: Initializes a new DRIP assessment conversation
+      responses:
+        "201":
+          description: Conversation started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationSession"
+
+  /conversation/{sessionId}/message:
+    post:
+      operationId: sendMessage
+      tags: [conversation]
+      summary: Send a user message and get AI response
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageInput"
+      responses:
+        "200":
+          description: AI response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /conversation/{sessionId}:
+    get:
+      operationId: getConversation
+      tags: [conversation]
+      summary: Get current conversation state
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Conversation state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationSession"
+        "404":
+          description: Session not found
+
+  /conversation/{sessionId}/analyze:
+    post:
+      operationId: analyzeConversation
+      tags: [conversation]
+      summary: Generate DRIP analysis and delegation report
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Delegation report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DelegationReport"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +116,133 @@ components:
       required:
         - status
 
+    ConversationSession:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+        phase:
+          type: string
+          enum: [intake, analysis, complete]
+        questionCount:
+          type: integer
+        isComplete:
+          type: boolean
+      required:
+        - sessionId
+        - messages
+        - phase
+        - questionCount
+        - isComplete
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+          enum: [assistant, user]
+        content:
+          type: string
+        timestamp:
+          type: string
+      required:
+        - id
+        - role
+        - content
+        - timestamp
+
+    MessageInput:
+      type: object
+      properties:
+        content:
+          type: string
+          minLength: 1
+      required:
+        - content
+
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          $ref: "#/components/schemas/Message"
+        session:
+          $ref: "#/components/schemas/ConversationSession"
+        readyForAnalysis:
+          type: boolean
+      required:
+        - message
+        - session
+        - readyForAnalysis
+
+    DelegationTask:
+      type: object
+      properties:
+        rank:
+          type: integer
+        taskName:
+          type: string
+        description:
+          type: string
+        drip:
+          type: string
+          enum: [D, R, I, P]
+        dripLabel:
+          type: string
+        hoursPerWeek:
+          type: number
+        roleType:
+          type: string
+        estimatedCostPerMonth:
+          type: number
+        timeValuePerMonth:
+          type: number
+        roi:
+          type: string
+        whyDelegate:
+          type: string
+      required:
+        - rank
+        - taskName
+        - description
+        - drip
+        - dripLabel
+        - hoursPerWeek
+        - roleType
+        - estimatedCostPerMonth
+        - timeValuePerMonth
+        - roi
+        - whyDelegate
+
+    DelegationReport:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        founderName:
+          type: ["string", "null"]
+        businessType:
+          type: ["string", "null"]
+        totalHoursReclaimed:
+          type: number
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/DelegationTask"
+        summary:
+          type: string
+        nextStep:
+          type: string
+      required:
+        - sessionId
+        - founderName
+        - businessType
+        - totalHoursReclaimed
+        - tasks
+        - summary
+        - nextStep
