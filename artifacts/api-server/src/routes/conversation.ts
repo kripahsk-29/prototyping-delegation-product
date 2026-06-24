@@ -37,6 +37,43 @@ function makeMessage(role: "assistant" | "user", content: string): Message {
   };
 }
 
+function extractSnippet(text: string, maxWords = 6): string {
+  const firstSentence = text.split(/[.!?\n]/)[0].trim();
+  const words = firstSentence.split(/\s+/).filter(Boolean);
+  const slice = words.slice(0, maxWords).join(" ");
+  return words.length > maxWords ? slice + "…" : slice;
+}
+
+function buildNextMessage(nextQuestionIndex: number, userAnswer: string): string {
+  const snippet = extractSnippet(userAnswer);
+  const nextQ = QUESTIONS[nextQuestionIndex];
+
+  // Each bridge acknowledges something specific about what they just said,
+  // then flows naturally into the next question.
+  const bridges: Record<number, (s: string) => string> = {
+    1: (s) =>
+      `"${s}" — sounds like your week is full before it even starts. That's actually really useful context.\n\n` + nextQ,
+
+    2: (s) =>
+      `That's a clear picture of where you want your energy going. Keeping "${s}" in mind — ` + nextQ,
+
+    3: (s) => {
+      // Try to extract a number from their answer for a more personal touch
+      const numMatch = userAnswer.match(/\b(\d+)\b/);
+      const hoursRef = numMatch
+        ? `Those ${numMatch[1]} hours`
+        : `That time you described — "${s}"`;
+      return `${hoursRef} is exactly the kind of thing we want to put a plan around.\n\n` + nextQ;
+    },
+
+    4: (s) =>
+      `That's a really useful distinction — knowing what's genuinely yours versus what just ended up on your plate. One last thing:\n\n` + nextQ,
+  };
+
+  const bridge = bridges[nextQuestionIndex];
+  return bridge ? bridge(snippet) : nextQ;
+}
+
 router.post("/conversation/start", (req, res) => {
   const sessionId = randomUUID();
   const firstMessage = makeMessage("assistant", QUESTIONS[0]);
@@ -89,14 +126,7 @@ router.post("/conversation/:sessionId/message", (req, res) => {
     session.phase = "analysis";
     session.isComplete = true;
   } else {
-    const acknowledgements = [
-      "That's really helpful — ",
-      "I can see why that keeps you busy. ",
-      "That's a common pattern with founders — ",
-      "Interesting — ",
-    ];
-    const ack = acknowledgements[(nextQuestionIndex - 1) % acknowledgements.length];
-    assistantMsg = makeMessage("assistant", ack + QUESTIONS[nextQuestionIndex]);
+    assistantMsg = makeMessage("assistant", buildNextMessage(nextQuestionIndex, content));
   }
 
   session.messages.push(assistantMsg);
@@ -118,7 +148,7 @@ router.post("/conversation/:sessionId/analyze", (req, res) => {
 
   const report = {
     sessionId: session.sessionId,
-    founderName: "Cory",
+    founderName: "",
     businessType: "Service Business",
     totalHoursReclaimed: 23,
     tasks: [
