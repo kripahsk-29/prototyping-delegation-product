@@ -21,7 +21,7 @@ interface Session {
 const sessions = new Map<string, Session>();
 
 const QUESTIONS = [
-  "Hey there — let's figure out what's eating your time. Walk me through what you did yesterday from the moment you started working. What did your day actually look like?",
+  "Hey there — let's figure out what's eating your time. Walk me through a typical week: what are you spending your time on, day to day?",
   "Got it. Now flip that around — if you had a completely clear day with zero tasks on your plate, how would you spend it to actually grow your business?",
   "Of everything you've mentioned, roughly how many hours a week do you spend on email, scheduling, admin tasks, or anything that feels repetitive?",
   "Which of those tasks feel like only *you* can handle them — where your specific judgment, relationships, or expertise really matters? And which ones do you do just because no one else is doing them?",
