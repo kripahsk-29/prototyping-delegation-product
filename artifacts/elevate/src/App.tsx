@@ -367,6 +367,197 @@ function TimeMapNow({ report }: { report: DelegationReport }) {
   );
 }
 
+// ── 90-day Delegation Roadmap ────────────────────────────────────────────────
+
+interface RoadmapMonth {
+  label: string;
+  title: string;
+  subtitle: string;
+  tasks: DelegationTask[];
+  bgFrom: string;
+  dot: string;
+}
+
+function DelegationRoadmap({ report }: { report: DelegationReport }) {
+  const tasks = report.tasks;
+  const buybackRate = report.buybackRate ?? 100;
+
+  const monthDefs: RoadmapMonth[] = [
+    {
+      label: "Month 1",
+      title: "Foundation",
+      subtitle: "Quickest wins — lowest friction, highest immediate ROI",
+      tasks: tasks.slice(0, 2),
+      bgFrom: "bg-[#f7f3e3]",
+      dot: "bg-[#c8b882]",
+    },
+    {
+      label: "Month 2",
+      title: "Momentum",
+      subtitle: "Layer in the next tier as your delegation muscle grows",
+      tasks: tasks.slice(2, 4),
+      bgFrom: "bg-[#e8f0ea]",
+      dot: "bg-[#7aaa87]",
+    },
+    {
+      label: "Month 3",
+      title: "Full Buy-Back",
+      subtitle: "Complete the handoff — you're operating at your Buyback Rate",
+      tasks: tasks.slice(4, 5),
+      bgFrom: "bg-[#d4e6d8]",
+      dot: "bg-primary",
+    },
+  ];
+
+  let cumulativeHrs = 0;
+  let cumulativeCost = 0;
+  let cumulativeValue = 0;
+
+  const months = monthDefs.map((def) => {
+    const hrs   = def.tasks.reduce((s: number, t: DelegationTask) => s + t.hoursPerWeek, 0);
+    const cost  = def.tasks.reduce((s: number, t: DelegationTask) => s + t.estimatedCostPerMonth, 0);
+    const value = def.tasks.reduce((s: number, t: DelegationTask) => s + t.timeValuePerMonth, 0);
+    cumulativeHrs   += hrs;
+    cumulativeCost  += cost;
+    cumulativeValue += value;
+    return {
+      ...def,
+      hrs,
+      cost,
+      cumulativeHrs,
+      cumulativeCost,
+      cumulativeValue,
+      netGain: cumulativeValue - cumulativeCost,
+    };
+  });
+
+  const finalMonth = months[months.length - 1];
+
+  return (
+    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="text-center space-y-1">
+        <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+          Your 90-Day Plan
+        </p>
+        <h3 className="text-2xl md:text-3xl font-serif text-foreground">
+          When to delegate, and in what order
+        </h3>
+        <p className="text-sm text-muted-foreground max-w-xl mx-auto">
+          Stack these hires one month at a time — each one funds the next with the time you get back.
+        </p>
+      </div>
+
+      <div className="relative space-y-0">
+        {months.map((month, i) => (
+          <div key={i} className="relative flex gap-5">
+            {/* Connector line */}
+            <div className="flex flex-col items-center">
+              <div className={`w-4 h-4 rounded-full mt-6 shrink-0 z-10 border-2 border-white shadow-sm ${month.dot}`} />
+              {i < months.length - 1 && (
+                <div className="w-0.5 flex-1 bg-border/50 my-1" />
+              )}
+            </div>
+
+            {/* Card */}
+            <div className={`${month.bgFrom} rounded-2xl border border-border/40 p-5 mb-4 flex-1 space-y-3`}>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <span className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+                    {month.label}
+                  </span>
+                  <h4 className="text-lg font-serif text-foreground leading-tight">
+                    {month.title}
+                  </h4>
+                  <p className="text-xs text-muted-foreground">{month.subtitle}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-xs text-muted-foreground">Cumulative hrs/wk</div>
+                  <div className="font-serif text-2xl text-primary leading-none">
+                    {month.cumulativeHrs}
+                    <span className="text-sm font-sans text-foreground"> hrs</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {month.tasks.map((t: DelegationTask) => (
+                  <div
+                    key={t.rank}
+                    className="flex items-center justify-between bg-white/60 rounded-xl px-4 py-2.5"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-xs font-bold text-primary/70 shrink-0">#{t.rank}</span>
+                      <span className="text-sm font-medium text-foreground truncate">
+                        {t.taskName}
+                      </span>
+                      <span className="text-xs text-muted-foreground shrink-0 hidden sm:inline">
+                        — {t.roleType}
+                      </span>
+                    </div>
+                    <div className="text-right shrink-0 ml-3">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t.hoursPerWeek} hrs/wk
+                      </span>
+                      <span className="text-xs text-muted-foreground ml-2">
+                        · ${t.estimatedCostPerMonth.toLocaleString()}/mo
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap gap-3 pt-1">
+                <div className="flex-1 min-w-[120px] bg-white/50 rounded-xl px-3 py-2 text-center">
+                  <div className="text-xs text-muted-foreground">Monthly cost</div>
+                  <div className="text-sm font-semibold text-foreground">
+                    ${month.cumulativeCost.toLocaleString()}
+                  </div>
+                </div>
+                <div className="flex-1 min-w-[120px] bg-white/50 rounded-xl px-3 py-2 text-center">
+                  <div className="text-xs text-muted-foreground">Value reclaimed</div>
+                  <div className="text-sm font-semibold text-primary">
+                    ${month.cumulativeValue.toLocaleString()}
+                  </div>
+                </div>
+                <div className="flex-1 min-w-[120px] bg-white/50 rounded-xl px-3 py-2 text-center">
+                  <div className="text-xs text-muted-foreground">Net gain</div>
+                  <div className="text-sm font-semibold text-primary">
+                    +${month.netGain.toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 90-day outcome strip */}
+      <div className="bg-primary text-primary-foreground rounded-2xl p-6 grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
+        <div>
+          <div className="text-xs opacity-70 uppercase tracking-widest mb-1">Hours freed/wk</div>
+          <div className="font-serif text-3xl">{finalMonth.cumulativeHrs}</div>
+        </div>
+        <div>
+          <div className="text-xs opacity-70 uppercase tracking-widest mb-1">Monthly cost</div>
+          <div className="font-serif text-3xl">${finalMonth.cumulativeCost.toLocaleString()}</div>
+        </div>
+        <div>
+          <div className="text-xs opacity-70 uppercase tracking-widest mb-1">Value reclaimed</div>
+          <div className="font-serif text-3xl">${finalMonth.cumulativeValue.toLocaleString()}</div>
+        </div>
+        <div>
+          <div className="text-xs opacity-70 uppercase tracking-widest mb-1">Net gain / mo</div>
+          <div className="font-serif text-3xl">+${finalMonth.netGain.toLocaleString()}</div>
+        </div>
+      </div>
+
+      <p className="text-xs text-center text-muted-foreground">
+        Value calculated at your Buyback Rate of ${buybackRate}/hr · Delegation costs use current market rates
+      </p>
+    </div>
+  );
+}
+
 function TimeMapFuture({ report }: { report: DelegationReport }) {
   const delegatedHours = report.tasks.reduce(
     (sum: number, t: DelegationTask) => sum + t.hoursPerWeek,
@@ -912,6 +1103,16 @@ function ElevateApp() {
             </div>
 
             <TaskCards report={report} />
+
+            <div className="flex items-center gap-4">
+              <div className="flex-1 border-t border-border/60" />
+              <span className="text-xs font-medium uppercase tracking-widest text-muted-foreground shrink-0 px-2">
+                90-Day Roadmap
+              </span>
+              <div className="flex-1 border-t border-border/60" />
+            </div>
+
+            <DelegationRoadmap report={report} />
 
             <div className="flex items-center gap-4">
               <div className="flex-1 border-t border-border/60" />
