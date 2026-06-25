@@ -602,6 +602,7 @@ function ElevateApp() {
   const [report, setReport] = useState<DelegationReport | null>(null);
   const [readyForAnalysis, setReadyForAnalysis] = useState(false);
   const [inputValue, setInputValue] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
 
   const startConversation = useStartConversation();
   const sendMessage = useSendMessage();
@@ -610,11 +611,11 @@ function ElevateApp() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, sendMessage.isPending]);
+  }, [messages, isTyping]);
 
   // Core submit — used by both text input and allocation widget
   const submitMessage = (content: string) => {
-    if (!sessionId || sendMessage.isPending) return;
+    if (!sessionId || isTyping) return;
 
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -625,14 +626,20 @@ function ElevateApp() {
     };
 
     setMessages((prev) => [...prev, userMsg]);
+    setIsTyping(true);
 
     sendMessage.mutate(
       { sessionId, data: { content } },
       {
         onSuccess: (response) => {
-          setMessages((prev) => [...prev, response.message]);
-          setReadyForAnalysis(response.readyForAnalysis);
+          // Pause to simulate thinking before the response appears
+          setTimeout(() => {
+            setIsTyping(false);
+            setMessages((prev) => [...prev, response.message]);
+            setReadyForAnalysis(response.readyForAnalysis);
+          }, 1400);
         },
+        onError: () => setIsTyping(false),
       }
     );
   };
@@ -673,6 +680,7 @@ function ElevateApp() {
     setMessages([]);
     setReport(null);
     setReadyForAnalysis(false);
+    setIsTyping(false);
   };
 
   // Track which allocation_form message has been submitted (by message id)
@@ -773,7 +781,7 @@ function ElevateApp() {
                 );
               })}
 
-              {sendMessage.isPending && (
+              {isTyping && (
                 <div className="flex w-full justify-start animate-in fade-in">
                   <div className="max-w-[80%] px-5 py-4 bg-muted text-foreground rounded-2xl rounded-tl-sm flex items-center space-x-2 shadow-sm">
                     <div
@@ -827,14 +835,14 @@ function ElevateApp() {
                     onChange={(e) => setInputValue(e.target.value)}
                     placeholder="Type your response..."
                     className="pr-12 py-6 text-base rounded-2xl bg-background border-border shadow-inner focus-visible:ring-primary/20"
-                    disabled={sendMessage.isPending}
+                    disabled={isTyping}
                   />
                   <Button
                     type="submit"
                     size="icon"
                     variant="ghost"
                     className="absolute right-2 text-primary hover:bg-primary/10 hover:text-primary rounded-xl"
-                    disabled={!inputValue.trim() || sendMessage.isPending}
+                    disabled={!inputValue.trim() || isTyping}
                   >
                     <Send className="w-5 h-5" />
                   </Button>

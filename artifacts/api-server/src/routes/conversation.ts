@@ -26,7 +26,7 @@ interface QuestionDef {
 
 const sessions = new Map<string, Session>();
 
-// 4 turns total: Q1 (text), Q2 (text), Q3 (allocation_form), Q4 (text)
+// 4 turns: Q1 (text), Q2 (text), Q3 (allocation_form), Q4 (text)
 const QUESTIONS: QuestionDef[] = [
   {
     content:
@@ -35,7 +35,7 @@ const QUESTIONS: QuestionDef[] = [
   },
   {
     content:
-      "Got it. Now flip that around — if you had a completely clear day with zero tasks on your plate, how would you spend it to actually grow your business?",
+      "Now flip that around — if you had a completely clear day with zero tasks on your plate, how would you spend it to actually grow your business?",
     msgType: "text",
   },
   {
@@ -64,42 +64,121 @@ function makeMessage(
   };
 }
 
-function extractSnippet(text: string, maxWords = 6): string {
-  const firstSentence = text.split(/[.!?\n]/)[0].trim();
-  const words = firstSentence.split(/\s+/).filter(Boolean);
-  const slice = words.slice(0, maxWords).join(" ");
-  return words.length > maxWords ? slice + "…" : slice;
-}
-
 function buildNextMessage(
   nextQuestionIndex: number,
   userAnswer: string
 ): { content: string; type: "text" | "allocation_form" } {
   const nextQ = QUESTIONS[nextQuestionIndex];
-  const snippet = extractSnippet(userAnswer);
 
-  const bridges: Record<number, (s: string) => string> = {
+  // Bridges acknowledge the answer without echoing words back verbatim
+  const bridges: Record<number, () => string> = {
     // After Q1 (typical week) → Q2 (ideal day)
-    1: (s) =>
-      `"${s}" — sounds like your week is full before it even starts. That's really useful context.\n\n` +
-      nextQ.content,
+    1: () => {
+      const wordCount = userAnswer.trim().split(/\s+/).length;
+      const opener =
+        wordCount > 30
+          ? "That's a lot to be carrying — and it paints a very clear picture."
+          : "Got it — that's really useful to know.";
+      return `${opener}\n\n` + nextQ.content;
+    },
 
     // After Q2 (ideal day) → Q3 (allocation form)
-    2: (s) =>
-      `That's a clear picture of where you want your energy going. Keeping "${s}" in mind — let's get specific about where your time actually goes right now:`,
+    2: () =>
+      `That's a clear vision. Now let's map out where your time actually goes today:`,
 
     // After Q3 form submission → Q4 (team + prior delegation)
     3: () =>
-      `That breakdown is really telling — the gap between current and desired is exactly where we focus.\n\nOne last thing:\n\n` +
+      `That breakdown is really telling. The gap between where you are and where you want to be is exactly what we'll close.\n\n` +
       nextQ.content,
   };
 
   const bridge = bridges[nextQuestionIndex];
-  // For allocation_form, the bridge IS the full content (widget renders the form)
-  const content = bridge ? bridge(snippet) : nextQ.content;
-
+  const content = bridge ? bridge() : nextQ.content;
   return { content, type: nextQ.msgType };
 }
+
+// ── Allocation parsing ──────────────────────────────────────────────────────
+
+function parsePct(text: string, keywords: string[]): number {
+  const lower = text.toLowerCase();
+  for (const kw of keywords) {
+    const idx = lower.indexOf(kw.toLowerCase());
+    if (idx === -1) continue;
+    const after = text.slice(idx + kw.length);
+    const m = after.match(/\s+(\d+)%/);
+    if (m) return parseInt(m[1]);
+  }
+  return 0;
+}
+
+interface Allocation {
+  current: { ops: number; strategy: number; relationships: number; sales: number; finance: number };
+  desired: { ops: number; strategy: number; relationships: number; sales: number; finance: number };
+}
+
+function parseAllocation(messages: Message[]): Allocation | null {
+  const msg = messages.find(
+    (m) => m.role === "user" && m.content.includes("Currently spending:")
+  );
+  if (!msg) return null;
+
+  const [currentPart = "", desiredPart = ""] = msg.content.split("Would like to spend:");
+
+  const extract = (text: string) => ({
+    ops: parsePct(text, ["day-to-day operations", "operations"]),
+    strategy: parsePct(text, ["business strategy", "strategy"]),
+    relationships: parsePct(text, ["relationships / partnerships", "relationships"]),
+    sales: parsePct(text, ["sales"]),
+    finance: parsePct(text, ["finance / accounting", "finance"]),
+  });
+
+  return { current: extract(currentPart), desired: extract(desiredPart) };
+}
+
+// ── Compute personalized report numbers ─────────────────────────────────────
+
+interface TaskNumbers {
+  emailHrs: number;
+  socialHrs: number;
+  onboardingHrs: number;
+  bookkeepingHrs: number;
+  followupHrs: number;
+  totalReclaimed: number;
+}
+
+function computeTaskNumbers(alloc: Allocation | null): TaskNumbers {
+  const WK = 40; // assumed weekly hours
+
+  if (!alloc) {
+    // Defaults when no allocation data available
+    return { emailHrs: 8, socialHrs: 5, onboardingHrs: 4, bookkeepingHrs: 3, followupHrs: 3, totalReclaimed: 23 };
+  }
+
+  const opsHrs = (alloc.current.ops / 100) * WK;
+  const financeHrs = (alloc.current.finance / 100) * WK;
+  const relHrs = (alloc.current.relationships / 100) * WK;
+
+  const opsDesiredHrs = (alloc.desired.ops / 100) * WK;
+  const financeDesiredHrs = (alloc.desired.finance / 100) * WK;
+  const relDesiredHrs = (alloc.desired.relationships / 100) * WK;
+
+  // Split ops hours across email, social, onboarding
+  const emailHrs  = Math.max(1, Math.round(opsHrs * 0.40));
+  const socialHrs = Math.max(1, Math.round(opsHrs * 0.25));
+  const onboardingHrs = Math.max(1, Math.round(opsHrs * 0.22));
+  const bookkeepingHrs = Math.max(1, Math.round(financeHrs));
+  const followupHrs = Math.max(1, Math.round(relHrs * 0.40));
+
+  // Reclaimed hours = delta on delegatable categories (cap at 35)
+  const opsReclaimed     = Math.max(0, (opsHrs - opsDesiredHrs) * 0.9);
+  const financeReclaimed = Math.max(0, financeHrs - financeDesiredHrs);
+  const relReclaimed     = Math.max(0, (relHrs - relDesiredHrs) * 0.4);
+  const totalReclaimed   = Math.min(35, Math.round(opsReclaimed + financeReclaimed + relReclaimed));
+
+  return { emailHrs, socialHrs, onboardingHrs, bookkeepingHrs, followupHrs, totalReclaimed };
+}
+
+// ── Routes ──────────────────────────────────────────────────────────────────
 
 router.post("/conversation/start", (req, res) => {
   const sessionId = randomUUID();
@@ -148,7 +227,7 @@ router.post("/conversation/:sessionId/message", (req, res) => {
   if (readyForAnalysis) {
     assistantMsg = makeMessage(
       "assistant",
-      "Thank you for sharing all of that — I have a really clear picture now. Give me just a moment to map everything through the DRIP framework and build your personalized delegation plan..."
+      "We understand and hear you. Let's figure out how to further gain your time back."
     );
     session.phase = "analysis";
     session.isComplete = true;
@@ -177,11 +256,36 @@ router.post("/conversation/:sessionId/analyze", (req, res) => {
 
   session.phase = "complete";
 
+  const alloc = parseAllocation(session.messages);
+  const t = computeTaskNumbers(alloc);
+
+  // Monthly costs by role type (hrs/week × 4 weeks × rate)
+  const emailCost        = Math.round(t.emailHrs * 4 * 22);        // EA ~$22/hr
+  const socialCost       = Math.round(t.socialHrs * 4 * 18);       // Social VA ~$18/hr
+  const onboardingCost   = Math.round(t.onboardingHrs * 4 * 22);   // EA ~$22/hr
+  const bookkeepingCost  = Math.round(t.bookkeepingHrs * 4 * 35);  // Bookkeeper ~$35/hr
+  const followupCost     = Math.round(t.followupHrs * 4 * 18);     // VA ~$18/hr
+
+  // Owner's time value at $100/hr
+  const ownerRate = 100;
+  const emailValue       = Math.round(t.emailHrs * 4 * ownerRate);
+  const socialValue      = Math.round(t.socialHrs * 4 * ownerRate);
+  const onboardingValue  = Math.round(t.onboardingHrs * 4 * ownerRate);
+  const bookkeepingValue = Math.round(t.bookkeepingHrs * 4 * ownerRate);
+  const followupValue    = Math.round(t.followupHrs * 4 * ownerRate);
+
+  const roiLabel = (value: number, cost: number) =>
+    `${Math.round(value / cost)}x return — reclaim $${value.toLocaleString()} of your time for $${cost.toLocaleString()}/mo`;
+
+  const totalDelegatedCost = emailCost + socialCost + onboardingCost + bookkeepingCost + followupCost;
+  const totalTimeValue = emailValue + socialValue + onboardingValue + bookkeepingValue + followupValue;
+  const overallRoi = Math.round(totalTimeValue / totalDelegatedCost);
+
   const report = {
     sessionId: session.sessionId,
     founderName: "",
     businessType: "Service Business",
-    totalHoursReclaimed: 23,
+    totalHoursReclaimed: t.totalReclaimed,
     tasks: [
       {
         rank: 1,
@@ -190,11 +294,11 @@ router.post("/conversation/:sessionId/analyze", (req, res) => {
           "Triaging inbox, responding to routine inquiries, booking meetings, and sending follow-up emails — consuming your first and last hour of every day.",
         drip: "D",
         dripLabel: "Delegate",
-        hoursPerWeek: 8,
-        roleType: "Executive/Virtual Assistant",
-        estimatedCostPerMonth: 800,
-        timeValuePerMonth: 3200,
-        roi: "4x return — you get $3,200 worth of your time back for $800/mo",
+        hoursPerWeek: t.emailHrs,
+        roleType: "Executive / Virtual Assistant",
+        estimatedCostPerMonth: emailCost,
+        timeValuePerMonth: emailValue,
+        roi: roiLabel(emailValue, emailCost),
         whyDelegate:
           "This is high-volume, low-judgment work. A trained EA can handle 90% of your inbox with a simple decision framework. You review and approve; you don't process.",
       },
@@ -205,13 +309,13 @@ router.post("/conversation/:sessionId/analyze", (req, res) => {
           "Writing captions, resizing images, posting across platforms, and responding to comments — tasks that feel strategic but are mostly execution.",
         drip: "D",
         dripLabel: "Delegate",
-        hoursPerWeek: 5,
+        hoursPerWeek: t.socialHrs,
         roleType: "Social Media VA / Content Assistant",
-        estimatedCostPerMonth: 500,
-        timeValuePerMonth: 2000,
-        roi: "4x return — reclaim $2,000 of your time for $500/mo",
+        estimatedCostPerMonth: socialCost,
+        timeValuePerMonth: socialValue,
+        roi: roiLabel(socialValue, socialCost),
         whyDelegate:
-          "You set the strategy and voice; someone else handles scheduling and posting. Batching content creation weekly with an assistant cuts this from 5 hours to a 30-minute review.",
+          "You set the strategy and voice; someone else handles scheduling and posting. Batching content creation weekly with an assistant cuts this to a 30-minute review.",
       },
       {
         rank: 3,
@@ -220,13 +324,13 @@ router.post("/conversation/:sessionId/analyze", (req, res) => {
           "Sending welcome packets, scheduling kick-off calls, collecting intake forms, and setting up project folders every time a new client signs.",
         drip: "R",
         dripLabel: "Replace with a System",
-        hoursPerWeek: 4,
+        hoursPerWeek: t.onboardingHrs,
         roleType: "EA + Automation (e.g. HoneyBook, Dubsado)",
-        estimatedCostPerMonth: 600,
-        timeValuePerMonth: 1600,
-        roi: "2.7x return — save $1,600 of your time for $600/mo",
+        estimatedCostPerMonth: onboardingCost,
+        timeValuePerMonth: onboardingValue,
+        roi: roiLabel(onboardingValue, onboardingCost),
         whyDelegate:
-          "This is 100% repeatable. A good EA paired with a simple CRM can run your entire onboarding without you — clients still feel taken care of, and you only appear at the relationship moments that matter.",
+          "This is 100% repeatable. A good EA paired with a simple CRM can run your entire onboarding without you — clients still feel taken care of, and you only appear at the moments that matter.",
       },
       {
         rank: 4,
@@ -235,11 +339,11 @@ router.post("/conversation/:sessionId/analyze", (req, res) => {
           "Logging expenses, categorizing transactions, chasing late invoices, and preparing reports for your accountant.",
         drip: "I",
         dripLabel: "Invest in a Specialist",
-        hoursPerWeek: 3,
+        hoursPerWeek: t.bookkeepingHrs,
         roleType: "Part-time Bookkeeper",
-        estimatedCostPerMonth: 400,
-        timeValuePerMonth: 1200,
-        roi: "3x return — reclaim $1,200 of your time for $400/mo",
+        estimatedCostPerMonth: bookkeepingCost,
+        timeValuePerMonth: bookkeepingValue,
+        roi: roiLabel(bookkeepingValue, bookkeepingCost),
         whyDelegate:
           "A bookkeeper does this faster and more accurately than you — and catches errors that cost you money. This also reduces your tax prep stress significantly.",
       },
@@ -250,19 +354,18 @@ router.post("/conversation/:sessionId/analyze", (req, res) => {
           "Sending weekly or bi-weekly status updates to existing clients, asking for feedback, and sharing project progress.",
         drip: "D",
         dripLabel: "Delegate",
-        hoursPerWeek: 3,
+        hoursPerWeek: t.followupHrs,
         roleType: "Virtual Assistant",
-        estimatedCostPerMonth: 300,
-        timeValuePerMonth: 1200,
-        roi: "4x return — reclaim $1,200 of your time for $300/mo",
+        estimatedCostPerMonth: followupCost,
+        timeValuePerMonth: followupValue,
+        roi: roiLabel(followupValue, followupCost),
         whyDelegate:
           "Clients value consistency, not just you personally. An EA using your templates maintains the relationship warmth while you focus on the high-value conversations.",
       },
     ],
-    summary:
-      "Based on your week, you're spending roughly 23 hours on tasks that don't need you specifically — that's more than half a full-time week. If you delegated just the top 3 items, you'd reclaim 17 hours a week for under $2,000/month. At your current hourly value, that's an immediate 3–4x return.",
+    summary: `Based on your week, you're spending roughly ${t.totalReclaimed} hours on tasks that don't need you specifically. Delegating just the top three items would cost around $${(emailCost + socialCost + onboardingCost).toLocaleString()}/month and return ${overallRoi}x that in reclaimed time — immediately.`,
     nextStep:
-      "Start with one hire: an Executive Assistant who can own your inbox, scheduling, and client onboarding. That single decision reclaims the most time for the least coordination overhead — and it's the move that Elevate's EA partners specialize in.",
+      "Start with one hire: an Executive Assistant who can own your inbox, scheduling, and client onboarding. That single decision reclaims the most time for the least coordination overhead.",
   };
 
   res.json(report);
