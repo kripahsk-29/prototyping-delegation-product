@@ -26,7 +26,7 @@ interface QuestionDef {
 
 const sessions = new Map<string, Session>();
 
-// 4 turns: Q1 (text), Q2 (text), Q3 (allocation_form), Q4 (text)
+// 5 turns: Q1 (text), Q2 (text), Q3 (allocation_form), Q4 (income), Q5 (team)
 const QUESTIONS: QuestionDef[] = [
   {
     content:
@@ -42,6 +42,11 @@ const QUESTIONS: QuestionDef[] = [
     content:
       "While running your business, approximately what percentage of your time do you currently spend — and would like to spend — on the following activities?",
     msgType: "allocation_form",
+  },
+  {
+    content:
+      "One more piece of the puzzle: roughly what's your annual business revenue, or how much are you personally targeting to earn this year? A ballpark is totally fine — this lets us calculate exactly what your time is actually worth.",
+    msgType: "text",
   },
   {
     content:
@@ -71,6 +76,7 @@ function buildNextMessage(
   const nextQ = QUESTIONS[nextQuestionIndex];
 
   const bridges: Record<number, () => string> = {
+    // After Q1 → Q2
     1: () => {
       const wordCount = userAnswer.trim().split(/\s+/).length;
       const opener =
@@ -79,15 +85,48 @@ function buildNextMessage(
           : "Got it — that's really useful to know.";
       return `${opener}\n\n` + nextQ.content;
     },
+    // After Q2 → Q3 (allocation form)
     2: () => `That's a clear vision. Now let's map out where your time actually goes today:`,
+    // After Q3 form → Q4 (income)
     3: () =>
       `That breakdown is really telling. The gap between where you are and where you want to be is exactly what we'll close.\n\n` +
+      nextQ.content,
+    // After Q4 income → Q5 (team)
+    4: () =>
+      `Perfect — that gives us everything we need to be precise with the numbers.\n\n` +
       nextQ.content,
   };
 
   const bridge = bridges[nextQuestionIndex];
   const content = bridge ? bridge() : nextQ.content;
   return { content, type: nextQ.msgType };
+}
+
+// ── Income parsing (Martell Buyback Rate) ───────────────────────────────────
+
+function parseIncome(text: string): number | null {
+  const cleaned = text.toLowerCase().replace(/,/g, "").replace(/\$/g, "");
+
+  // "1.5 million" / "1.5m"
+  const millionMatch = cleaned.match(/(\d+\.?\d*)\s*(?:million|m\b)/);
+  if (millionMatch) return Math.round(parseFloat(millionMatch[1]) * 1_000_000);
+
+  // "200k" / "200 thousand"
+  const kMatch = cleaned.match(/(\d+\.?\d*)\s*(?:k\b|thousand)/);
+  if (kMatch) return Math.round(parseFloat(kMatch[1]) * 1_000);
+
+  // Plain number >= 10,000 (e.g. "200000")
+  const bigMatch = cleaned.match(/\b(\d{5,})\b/);
+  if (bigMatch) return parseInt(bigMatch[1]);
+
+  // 3-4 digit number — treat as thousands (e.g. "200" → $200k, "85" → $85k)
+  const smallMatch = cleaned.match(/\b(\d{2,4})\b/);
+  if (smallMatch) {
+    const n = parseInt(smallMatch[1]);
+    if (n >= 20) return n * 1_000;
+  }
+
+  return null;
 }
 
 // ── Allocation parsing ──────────────────────────────────────────────────────
@@ -116,7 +155,6 @@ function parseAllocation(messages: Message[]): Allocation | null {
   if (!msg) return null;
 
   const [currentPart = "", desiredPart = ""] = msg.content.split("Would like to spend:");
-
   const extract = (text: string) => ({
     ops:           parsePct(text, ["day-to-day operations", "operations"]),
     strategy:      parsePct(text, ["business strategy", "strategy"]),
@@ -124,7 +162,6 @@ function parseAllocation(messages: Message[]): Allocation | null {
     sales:         parsePct(text, ["sales"]),
     finance:       parsePct(text, ["finance / accounting", "finance"]),
   });
-
   return { current: extract(currentPart), desired: extract(desiredPart) };
 }
 
@@ -136,18 +173,17 @@ function getCategoryHrs(alloc: Allocation | null, category: string): number {
     };
     return defaults[category] ?? 5;
   }
-  const pct = ({
+  const pctMap: Record<string, number> = {
     ops:           alloc.current.ops,
     strategy:      alloc.current.strategy,
     relationships: alloc.current.relationships,
     sales:         alloc.current.sales,
     finance:       alloc.current.finance,
-  } as Record<string, number>)[category] ?? 0;
-  return (pct / 100) * WK;
+  };
+  return ((pctMap[category] ?? 0) / 100) * WK;
 }
 
 // ── Task pool ───────────────────────────────────────────────────────────────
-// 12 templates across 4 categories. selectTasks picks the best 5 for this user.
 
 interface TaskTemplate {
   taskName: string;
@@ -158,9 +194,9 @@ interface TaskTemplate {
   whyDelegate: string;
   category: "ops" | "finance" | "sales" | "relationships";
   keywords: string[];
-  /** Fraction of the category's weekly hours this task represents */
   hoursFraction: number;
-  costPerHour: number;
+  /** Market rate for the role (hourly) */
+  marketRatePerHour: number;
 }
 
 const TASK_POOL: TaskTemplate[] = [
@@ -176,7 +212,7 @@ const TASK_POOL: TaskTemplate[] = [
     category: "ops",
     keywords: ["email", "inbox", "emails", "respond", "replies", "messages", "gmail", "outlook", "mailbox"],
     hoursFraction: 0.40,
-    costPerHour: 22,
+    marketRatePerHour: 22,
   },
   {
     taskName: "Calendar & Meeting Scheduling",
@@ -189,7 +225,7 @@ const TASK_POOL: TaskTemplate[] = [
     category: "ops",
     keywords: ["calendar", "schedule", "scheduling", "meetings", "appointments", "booking", "calls", "zoom", "reschedule"],
     hoursFraction: 0.20,
-    costPerHour: 22,
+    marketRatePerHour: 22,
   },
   {
     taskName: "Social Media Posting & Management",
@@ -202,7 +238,7 @@ const TASK_POOL: TaskTemplate[] = [
     category: "ops",
     keywords: ["social", "instagram", "facebook", "linkedin", "twitter", "tiktok", "posts", "posting", "content", "media", "reel", "reels"],
     hoursFraction: 0.25,
-    costPerHour: 18,
+    marketRatePerHour: 18,
   },
   {
     taskName: "Client Onboarding Administration",
@@ -215,7 +251,7 @@ const TASK_POOL: TaskTemplate[] = [
     category: "ops",
     keywords: ["onboarding", "onboard", "welcome", "new client", "intake", "setup", "kickoff", "kick-off", "portal"],
     hoursFraction: 0.25,
-    costPerHour: 22,
+    marketRatePerHour: 22,
   },
   {
     taskName: "Project Status Updates & Reporting",
@@ -228,7 +264,7 @@ const TASK_POOL: TaskTemplate[] = [
     category: "ops",
     keywords: ["updates", "status", "project", "reporting", "reports", "tracker", "progress", "asana", "notion", "monday", "clickup"],
     hoursFraction: 0.15,
-    costPerHour: 20,
+    marketRatePerHour: 20,
   },
   // ── Finance ─────────────────────────────────────────────────────────────
   {
@@ -242,7 +278,7 @@ const TASK_POOL: TaskTemplate[] = [
     category: "finance",
     keywords: ["books", "bookkeeping", "accounting", "invoices", "invoicing", "expenses", "finance", "financial", "taxes", "billing", "quickbooks", "xero"],
     hoursFraction: 0.70,
-    costPerHour: 35,
+    marketRatePerHour: 35,
   },
   {
     taskName: "Payroll & Contractor Payments",
@@ -255,7 +291,7 @@ const TASK_POOL: TaskTemplate[] = [
     category: "finance",
     keywords: ["payroll", "staff", "employees", "wages", "salaries", "contractors", "hr", "paystub", "gusto", "rippling"],
     hoursFraction: 0.30,
-    costPerHour: 35,
+    marketRatePerHour: 35,
   },
   // ── Sales ───────────────────────────────────────────────────────────────
   {
@@ -269,7 +305,7 @@ const TASK_POOL: TaskTemplate[] = [
     category: "sales",
     keywords: ["crm", "leads", "pipeline", "hubspot", "salesforce", "contacts", "deals", "prospects", "sales", "follow-up", "follow up"],
     hoursFraction: 0.35,
-    costPerHour: 20,
+    marketRatePerHour: 20,
   },
   {
     taskName: "Proposal & Quote Preparation",
@@ -282,7 +318,7 @@ const TASK_POOL: TaskTemplate[] = [
     category: "sales",
     keywords: ["proposals", "quotes", "bids", "pitches", "estimates", "decks", "scope", "pricing", "proposal"],
     hoursFraction: 0.30,
-    costPerHour: 22,
+    marketRatePerHour: 22,
   },
   {
     taskName: "Outbound Outreach & Follow-up Sequences",
@@ -291,11 +327,11 @@ const TASK_POOL: TaskTemplate[] = [
     drip: "D", dripLabel: "Delegate",
     roleType: "Sales Development Rep / VA",
     whyDelegate:
-      "Top-of-funnel outreach is systematizable. A trained SDR or outreach VA working from your templates generates qualified conversations without eating your calendar.",
+      "Top-of-funnel outreach is systematizable. A trained SDR working from your templates generates qualified conversations without eating your calendar.",
     category: "sales",
     keywords: ["outreach", "prospecting", "cold", "linkedin", "lead", "leads", "contact", "prospects", "sales email", "cold email"],
     hoursFraction: 0.35,
-    costPerHour: 25,
+    marketRatePerHour: 25,
   },
   // ── Relationships ───────────────────────────────────────────────────────
   {
@@ -309,7 +345,7 @@ const TASK_POOL: TaskTemplate[] = [
     category: "relationships",
     keywords: ["check-in", "check in", "checking in", "update", "client emails", "weekly", "touchpoint", "follow up"],
     hoursFraction: 0.40,
-    costPerHour: 18,
+    marketRatePerHour: 18,
   },
   {
     taskName: "Partnership & Vendor Coordination",
@@ -322,7 +358,7 @@ const TASK_POOL: TaskTemplate[] = [
     category: "relationships",
     keywords: ["partnerships", "partners", "vendors", "suppliers", "collaborations", "contractors", "coordination", "agencies"],
     hoursFraction: 0.35,
-    costPerHour: 20,
+    marketRatePerHour: 20,
   },
   {
     taskName: "Review & Testimonial Requests",
@@ -335,7 +371,7 @@ const TASK_POOL: TaskTemplate[] = [
     category: "relationships",
     keywords: ["reviews", "testimonials", "feedback", "referrals", "google", "case study", "reputation"],
     hoursFraction: 0.20,
-    costPerHour: 18,
+    marketRatePerHour: 18,
   },
 ];
 
@@ -357,58 +393,55 @@ interface SelectedTask {
 
 function selectTasks(
   alloc: Allocation | null,
-  q1Text: string
+  q1Text: string,
+  buybackRate: number
 ): SelectedTask[] {
   const lower = q1Text.toLowerCase();
 
   const scored = TASK_POOL.map((task) => {
     let score = 0;
-
-    // Keyword match in Q1 answer
     const kwHits = task.keywords.filter((k) => lower.includes(k)).length;
     score += kwHits * 18;
 
     if (alloc) {
-      const currentPct = ({
+      const catPctMap: Record<string, number> = {
         ops:           alloc.current.ops,
         finance:       alloc.current.finance,
         sales:         alloc.current.sales,
         relationships: alloc.current.relationships,
-      } as Record<string, number>)[task.category] ?? 0;
-
-      const delta = Math.max(
-        0,
-        currentPct -
-          ({
-            ops:           alloc.desired.ops,
-            finance:       alloc.desired.finance,
-            sales:         alloc.desired.sales,
-            relationships: alloc.desired.relationships,
-          } as Record<string, number>)[task.category] ?? 0
-      );
-
-      score += currentPct * 0.7;   // spending a lot here = worth delegating
-      score += delta * 1.5;         // large gap = user explicitly wants less of this
+      };
+      const desPctMap: Record<string, number> = {
+        ops:           alloc.desired.ops,
+        finance:       alloc.desired.finance,
+        sales:         alloc.desired.sales,
+        relationships: alloc.desired.relationships,
+      };
+      const currentPct = catPctMap[task.category] ?? 0;
+      const desiredPct = desPctMap[task.category] ?? 0;
+      const delta = Math.max(0, currentPct - desiredPct);
+      score += currentPct * 0.7;
+      score += delta * 1.5;
     } else {
-      // Without allocation data, lean on ops tasks as sensible defaults
       if (task.category === "ops") score += 20;
     }
 
     return { task, score };
   });
 
-  const top5 = scored
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 5);
-
-  const OWNER_RATE = 100; // $100/hr assumed owner time value
+  const top5 = scored.sort((a, b) => b.score - a.score).slice(0, 5);
 
   return top5.map(({ task }, i) => {
     const categoryHrs = getCategoryHrs(alloc, task.category);
     const hoursPerWeek = Math.max(1, Math.round(categoryHrs * task.hoursFraction));
-    const costPerMonth = Math.round(hoursPerWeek * 4 * task.costPerHour);
-    const valuePerMonth = Math.round(hoursPerWeek * 4 * OWNER_RATE);
-    const roiMultiple = Math.round(valuePerMonth / Math.max(1, costPerMonth));
+
+    // Martell's formula:
+    //   value  = hours × buybackRate (what the owner's time is actually worth)
+    //   cost   = hours × marketRatePerHour (what the delegatee gets paid)
+    //   roi    = buybackRate / marketRatePerHour
+    const weeksPerMonth = 4;
+    const valuePerMonth = Math.round(hoursPerWeek * weeksPerMonth * buybackRate);
+    const costPerMonth  = Math.round(hoursPerWeek * weeksPerMonth * task.marketRatePerHour);
+    const roiMultiple   = Math.round(buybackRate / task.marketRatePerHour);
 
     return {
       rank: i + 1,
@@ -421,24 +454,21 @@ function selectTasks(
       hoursPerWeek,
       estimatedCostPerMonth: costPerMonth,
       timeValuePerMonth: valuePerMonth,
-      roi: `${roiMultiple}x return — reclaim $${valuePerMonth.toLocaleString()} of your time for $${costPerMonth.toLocaleString()}/mo`,
+      roi: `${roiMultiple}x return — your time is worth $${Math.round(buybackRate)}/hr, you pay $${task.marketRatePerHour}/hr`,
     };
   });
 }
 
 function computeTotalReclaimed(alloc: Allocation | null, tasks: SelectedTask[]): number {
   if (!alloc) return tasks.reduce((s, t) => s + t.hoursPerWeek, 0);
-
   const WK = 40;
   const delta = (cur: number, des: number, scale = 1) =>
     Math.max(0, ((cur - des) / 100) * WK * scale);
-
   const reclaimed =
     delta(alloc.current.ops, alloc.desired.ops, 0.9) +
     delta(alloc.current.finance, alloc.desired.finance, 1.0) +
     delta(alloc.current.sales, alloc.desired.sales, 0.75) +
     delta(alloc.current.relationships, alloc.desired.relationships, 0.45);
-
   return Math.min(35, Math.max(1, Math.round(reclaimed)));
 }
 
@@ -490,12 +520,14 @@ router.post("/conversation/:sessionId/message", (req, res) => {
     session.phase = "analysis";
     session.isComplete = true;
   } else {
-    const { content: nextContent, type: nextType } = buildNextMessage(nextQuestionIndex, content);
+    const { content: nextContent, type: nextType } = buildNextMessage(
+      nextQuestionIndex,
+      content
+    );
     assistantMsg = makeMessage("assistant", nextContent, nextType);
   }
 
   session.messages.push(assistantMsg);
-
   res.json({ message: assistantMsg, session, readyForAnalysis });
 });
 
@@ -506,26 +538,37 @@ router.post("/conversation/:sessionId/analyze", (req, res) => {
   session.phase = "complete";
 
   const alloc = parseAllocation(session.messages);
+  const q1Answer = session.messages.find((m) => m.role === "user")?.content ?? "";
 
-  // Q1 answer: second message in session (index 1), first user message
-  const q1Answer =
-    session.messages.find((m) => m.role === "user")?.content ?? "";
+  // Find Q4 (income) answer — the second user text message after the allocation form
+  const userMessages = session.messages.filter((m) => m.role === "user");
+  // userMessages[0] = Q1, [1] = Q2, [2] = allocation form, [3] = income, [4] = team
+  const incomeText = userMessages[3]?.content ?? "";
+  const annualIncome = parseIncome(incomeText) ?? 100_000; // fallback only if truly unparseable
 
-  const tasks = selectTasks(alloc, q1Answer);
+  // Martell's Buyback Rate: income / 2000 working hours per year
+  const buybackRate = annualIncome / 2_000;
+  // ¼ Rule: max hourly delegation cost should be ≤ 1/4 of buyback rate
+  const quarterRate = buybackRate / 4;
+
+  const tasks = selectTasks(alloc, q1Answer, buybackRate);
   const totalHoursReclaimed = computeTotalReclaimed(alloc, tasks);
 
-  const totalCost = tasks.reduce((s, t) => s + t.estimatedCostPerMonth, 0);
+  const totalCost  = tasks.reduce((s, t) => s + t.estimatedCostPerMonth, 0);
   const totalValue = tasks.reduce((s, t) => s + t.timeValuePerMonth, 0);
-  const overallRoi = Math.round(totalValue / Math.max(1, totalCost));
-  const top3Cost = tasks.slice(0, 3).reduce((s, t) => s + t.estimatedCostPerMonth, 0);
+  const top3Cost   = tasks.slice(0, 3).reduce((s, t) => s + t.estimatedCostPerMonth, 0);
+  const overallRoi = Math.round(buybackRate / (totalCost / tasks.reduce((s, t) => s + t.hoursPerWeek * 4, 0) || 1));
 
   const report = {
     sessionId: session.sessionId,
     founderName: "",
     businessType: "Service Business",
     totalHoursReclaimed,
+    annualIncome,
+    buybackRate: Math.round(buybackRate),
+    quarterRate: Math.round(quarterRate),
     tasks,
-    summary: `Based on what you shared, you're spending roughly ${totalHoursReclaimed} hours a week on work that doesn't need to be yours. Delegating just the top three items on this list would cost around $${top3Cost.toLocaleString()}/month — and return ${overallRoi}x that in reclaimed time, immediately.`,
+    summary: `Based on what you shared, you're spending roughly ${totalHoursReclaimed} hours a week on work that doesn't need to be yours. At your Buyback Rate of $${Math.round(buybackRate)}/hr, that's $${(totalHoursReclaimed * 4 * Math.round(buybackRate)).toLocaleString()}/month in time cost. Delegating the top three items would run about $${top3Cost.toLocaleString()}/month — an immediate ${overallRoi}x return.`,
     nextStep:
       "Start with the highest-ranked item on this list. Pick one thing, hire or systemize for it this week, and let the momentum build. That first delegation decision is always the hardest — and the most valuable.",
   };

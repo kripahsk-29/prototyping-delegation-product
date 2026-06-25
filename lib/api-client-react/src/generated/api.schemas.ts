@@ -92,6 +92,12 @@ export interface DelegationReport {
   /** @nullable */
   businessType: string | null;
   totalHoursReclaimed: number;
+  /** Owner's hourly time value (annual income / 2000) */
+  buybackRate?: number;
+  /** Martell's 1/4 Rule: max hourly delegation cost (buybackRate / 4) */
+  quarterRate?: number;
+  /** User-provided annual revenue or income */
+  annualIncome?: number;
   tasks: DelegationTask[];
   summary: string;
   nextStep: string;

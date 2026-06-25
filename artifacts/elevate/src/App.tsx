@@ -10,7 +10,8 @@ import {
 import type {
   Message,
   DelegationReport,
-} from "@workspace/api-client-react/src/generated/api.schemas";
+  DelegationTask,
+} from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -242,13 +243,13 @@ function AllocationFormWidget({
 
 function TimeMapNow({ report }: { report: DelegationReport }) {
   const delegatableHours = report.tasks.reduce(
-    (sum, t) => sum + t.hoursPerWeek,
+    (sum: number, t: DelegationTask) => sum + t.hoursPerWeek,
     0
   );
   const protectedHours = Math.max(0, 40 - delegatableHours);
 
   const chartData = [
-    ...report.tasks.map((t) => ({
+    ...report.tasks.map((t: DelegationTask) => ({
       name: t.taskName,
       value: t.hoursPerWeek,
       drip: t.drip,
@@ -262,7 +263,7 @@ function TimeMapNow({ report }: { report: DelegationReport }) {
   ];
 
   const weaknesses = report.tasks.filter(
-    (t) => t.drip === "D" || t.drip === "R"
+    (t: DelegationTask) => t.drip === "D" || t.drip === "R"
   );
 
   return (
@@ -323,7 +324,7 @@ function TimeMapNow({ report }: { report: DelegationReport }) {
               <AlertCircle className="w-4 h-4" />
               Time drains (delegate these)
             </div>
-            {weaknesses.map((t) => (
+            {weaknesses.map((t: DelegationTask) => (
               <div key={t.rank} className="flex items-center justify-between">
                 <span className="text-sm text-foreground/80">{t.taskName}</span>
                 <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
@@ -368,7 +369,7 @@ function TimeMapNow({ report }: { report: DelegationReport }) {
 
 function TimeMapFuture({ report }: { report: DelegationReport }) {
   const delegatedHours = report.tasks.reduce(
-    (sum, t) => sum + t.hoursPerWeek,
+    (sum: number, t: DelegationTask) => sum + t.hoursPerWeek,
     0
   );
   const currentProtected = Math.max(0, 40 - delegatedHours);
@@ -384,11 +385,11 @@ function TimeMapFuture({ report }: { report: DelegationReport }) {
   ];
 
   const totalDelegatedCost = report.tasks.reduce(
-    (sum, t) => sum + t.estimatedCostPerMonth,
+    (sum: number, t: DelegationTask) => sum + t.estimatedCostPerMonth,
     0
   );
   const totalTimeValueReclaimed = report.tasks.reduce(
-    (sum, t) => sum + t.timeValuePerMonth,
+    (sum: number, t: DelegationTask) => sum + t.timeValuePerMonth,
     0
   );
   const quarterHours = report.totalHoursReclaimed * 12;
@@ -523,7 +524,7 @@ function TaskCards({ report }: { report: DelegationReport }) {
           What to hand off, and to whom
         </h3>
       </div>
-      {report.tasks.map((task) => (
+      {report.tasks.map((task: DelegationTask) => (
         <Card
           key={task.rank}
           className="overflow-hidden border-border/60 shadow-sm hover:shadow-md transition-shadow duration-300 rounded-3xl"
@@ -864,9 +865,9 @@ function ElevateApp() {
               </p>
             </div>
 
-            <div className="flex justify-center">
-              <div className="bg-accent/50 text-accent-foreground px-8 py-6 rounded-3xl inline-flex flex-col items-center border border-accent">
-                <span className="text-sm font-medium uppercase tracking-widest opacity-80 mb-2">
+            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+              <div className="bg-accent/50 text-accent-foreground px-8 py-6 rounded-3xl inline-flex flex-col items-center border border-accent flex-1 max-w-xs mx-auto sm:mx-0">
+                <span className="text-sm font-medium uppercase tracking-widest opacity-80 mb-2 text-center">
                   Hours Reclaimed Per Week
                 </span>
                 <span className="font-serif text-5xl md:text-6xl text-primary">
@@ -876,6 +877,26 @@ function ElevateApp() {
                   </span>
                 </span>
               </div>
+
+              {report.buybackRate != null && (
+                <div className="bg-primary/10 text-foreground px-8 py-6 rounded-3xl inline-flex flex-col items-center border border-primary/20 flex-1 max-w-xs mx-auto sm:mx-0 space-y-3">
+                  <span className="text-sm font-medium uppercase tracking-widest opacity-80 text-center">
+                    Your Buyback Rate
+                  </span>
+                  <span className="font-serif text-5xl md:text-6xl text-primary">
+                    ${report.buybackRate}
+                    <span className="text-2xl text-foreground font-sans">/hr</span>
+                  </span>
+                  <div className="text-center space-y-1">
+                    <p className="text-xs text-muted-foreground">
+                      Based on ${report.annualIncome != null ? report.annualIncome.toLocaleString() : "—"}/yr ÷ 2,000 hrs
+                    </p>
+                    <p className="text-xs font-medium text-primary/80">
+                      ¼ Rule: only delegate at ≤${report.quarterRate}/hr
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="bg-card border border-border/60 rounded-3xl p-6 md:p-8 shadow-sm">

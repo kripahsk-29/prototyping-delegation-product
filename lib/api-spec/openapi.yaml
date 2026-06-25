@@ -234,6 +234,15 @@ components:
           type: ["string", "null"]
         totalHoursReclaimed:
           type: number
+        buybackRate:
+          type: number
+          description: Owner's hourly time value (annual income / 2000)
+        quarterRate:
+          type: number
+          description: "Martell's 1/4 Rule: max hourly delegation cost (buybackRate / 4)"
+        annualIncome:
+          type: number
+          description: User-provided annual revenue or income
         tasks:
           type: array
           items:

@@ -95,6 +95,9 @@ export const AnalyzeConversationResponse = zod.object({
   "founderName": zod.string().nullable(),
   "businessType": zod.string().nullable(),
   "totalHoursReclaimed": zod.number(),
+  "buybackRate": zod.number().optional().describe('Owner\'s hourly time value (annual income \/ 2000)'),
+  "quarterRate": zod.number().optional().describe('Martell\'s 1\/4 Rule: max hourly delegation cost (buybackRate \/ 4)'),
+  "annualIncome": zod.number().optional().describe('User-provided annual revenue or income'),
   "tasks": zod.array(zod.object({
   "rank": zod.number(),
   "taskName": zod.string(),
