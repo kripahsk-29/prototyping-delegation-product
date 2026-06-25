@@ -70,9 +70,7 @@ function buildNextMessage(
 ): { content: string; type: "text" | "allocation_form" } {
   const nextQ = QUESTIONS[nextQuestionIndex];
 
-  // Bridges acknowledge the answer without echoing words back verbatim
   const bridges: Record<number, () => string> = {
-    // After Q1 (typical week) → Q2 (ideal day)
     1: () => {
       const wordCount = userAnswer.trim().split(/\s+/).length;
       const opener =
@@ -81,12 +79,7 @@ function buildNextMessage(
           : "Got it — that's really useful to know.";
       return `${opener}\n\n` + nextQ.content;
     },
-
-    // After Q2 (ideal day) → Q3 (allocation form)
-    2: () =>
-      `That's a clear vision. Now let's map out where your time actually goes today:`,
-
-    // After Q3 form submission → Q4 (team + prior delegation)
+    2: () => `That's a clear vision. Now let's map out where your time actually goes today:`,
     3: () =>
       `That breakdown is really telling. The gap between where you are and where you want to be is exactly what we'll close.\n\n` +
       nextQ.content,
@@ -125,57 +118,328 @@ function parseAllocation(messages: Message[]): Allocation | null {
   const [currentPart = "", desiredPart = ""] = msg.content.split("Would like to spend:");
 
   const extract = (text: string) => ({
-    ops: parsePct(text, ["day-to-day operations", "operations"]),
-    strategy: parsePct(text, ["business strategy", "strategy"]),
+    ops:           parsePct(text, ["day-to-day operations", "operations"]),
+    strategy:      parsePct(text, ["business strategy", "strategy"]),
     relationships: parsePct(text, ["relationships / partnerships", "relationships"]),
-    sales: parsePct(text, ["sales"]),
-    finance: parsePct(text, ["finance / accounting", "finance"]),
+    sales:         parsePct(text, ["sales"]),
+    finance:       parsePct(text, ["finance / accounting", "finance"]),
   });
 
   return { current: extract(currentPart), desired: extract(desiredPart) };
 }
 
-// ── Compute personalized report numbers ─────────────────────────────────────
-
-interface TaskNumbers {
-  emailHrs: number;
-  socialHrs: number;
-  onboardingHrs: number;
-  bookkeepingHrs: number;
-  followupHrs: number;
-  totalReclaimed: number;
+function getCategoryHrs(alloc: Allocation | null, category: string): number {
+  const WK = 40;
+  if (!alloc) {
+    const defaults: Record<string, number> = {
+      ops: 16, finance: 3, sales: 5, relationships: 6, strategy: 10,
+    };
+    return defaults[category] ?? 5;
+  }
+  const pct = ({
+    ops:           alloc.current.ops,
+    strategy:      alloc.current.strategy,
+    relationships: alloc.current.relationships,
+    sales:         alloc.current.sales,
+    finance:       alloc.current.finance,
+  } as Record<string, number>)[category] ?? 0;
+  return (pct / 100) * WK;
 }
 
-function computeTaskNumbers(alloc: Allocation | null): TaskNumbers {
-  const WK = 40; // assumed weekly hours
+// ── Task pool ───────────────────────────────────────────────────────────────
+// 12 templates across 4 categories. selectTasks picks the best 5 for this user.
 
-  if (!alloc) {
-    // Defaults when no allocation data available
-    return { emailHrs: 8, socialHrs: 5, onboardingHrs: 4, bookkeepingHrs: 3, followupHrs: 3, totalReclaimed: 23 };
-  }
+interface TaskTemplate {
+  taskName: string;
+  description: string;
+  drip: "D" | "R" | "I" | "P";
+  dripLabel: string;
+  roleType: string;
+  whyDelegate: string;
+  category: "ops" | "finance" | "sales" | "relationships";
+  keywords: string[];
+  /** Fraction of the category's weekly hours this task represents */
+  hoursFraction: number;
+  costPerHour: number;
+}
 
-  const opsHrs = (alloc.current.ops / 100) * WK;
-  const financeHrs = (alloc.current.finance / 100) * WK;
-  const relHrs = (alloc.current.relationships / 100) * WK;
+const TASK_POOL: TaskTemplate[] = [
+  // ── Operations ─────────────────────────────────────────────────────────
+  {
+    taskName: "Email & Inbox Management",
+    description:
+      "Triaging your inbox, responding to routine inquiries, flagging what needs your attention, and sending templated replies — consuming your first and last hour of every day.",
+    drip: "D", dripLabel: "Delegate",
+    roleType: "Executive / Virtual Assistant",
+    whyDelegate:
+      "A trained EA can handle 80–90% of your inbox using a decision framework you build once. You review and approve — you don't process.",
+    category: "ops",
+    keywords: ["email", "inbox", "emails", "respond", "replies", "messages", "gmail", "outlook", "mailbox"],
+    hoursFraction: 0.40,
+    costPerHour: 22,
+  },
+  {
+    taskName: "Calendar & Meeting Scheduling",
+    description:
+      "Booking calls, coordinating availability, sending reminders, handling reschedules, and making sure nothing slips through the cracks.",
+    drip: "D", dripLabel: "Delegate",
+    roleType: "Executive / Virtual Assistant",
+    whyDelegate:
+      "Back-and-forth scheduling is pure coordination overhead. An EA with calendar access eliminates it — one fewer cognitive drain every single day.",
+    category: "ops",
+    keywords: ["calendar", "schedule", "scheduling", "meetings", "appointments", "booking", "calls", "zoom", "reschedule"],
+    hoursFraction: 0.20,
+    costPerHour: 22,
+  },
+  {
+    taskName: "Social Media Posting & Management",
+    description:
+      "Writing captions, resizing visuals, posting across platforms, and responding to comments and DMs.",
+    drip: "D", dripLabel: "Delegate",
+    roleType: "Social Media VA / Content Assistant",
+    whyDelegate:
+      "You set the strategy and voice — someone else handles execution. Batching content creation once a week with an assistant cuts this to a 30-minute review.",
+    category: "ops",
+    keywords: ["social", "instagram", "facebook", "linkedin", "twitter", "tiktok", "posts", "posting", "content", "media", "reel", "reels"],
+    hoursFraction: 0.25,
+    costPerHour: 18,
+  },
+  {
+    taskName: "Client Onboarding Administration",
+    description:
+      "Sending welcome packets, scheduling kick-off calls, collecting intake forms, and setting up project folders every time a new client signs.",
+    drip: "R", dripLabel: "Replace with a System",
+    roleType: "EA + Automation (e.g. HoneyBook, Dubsado)",
+    whyDelegate:
+      "This is 100% repeatable. A good EA paired with a simple CRM runs your entire onboarding without you — clients feel taken care of, and you only show up at the moments that matter.",
+    category: "ops",
+    keywords: ["onboarding", "onboard", "welcome", "new client", "intake", "setup", "kickoff", "kick-off", "portal"],
+    hoursFraction: 0.25,
+    costPerHour: 22,
+  },
+  {
+    taskName: "Project Status Updates & Reporting",
+    description:
+      "Compiling weekly progress notes, updating project trackers, and sending stakeholder status emails so everyone stays aligned.",
+    drip: "D", dripLabel: "Delegate",
+    roleType: "Project Coordinator / VA",
+    whyDelegate:
+      "Status updates are important but don't require you. A coordinator who understands your workflow can pull and distribute this on your behalf.",
+    category: "ops",
+    keywords: ["updates", "status", "project", "reporting", "reports", "tracker", "progress", "asana", "notion", "monday", "clickup"],
+    hoursFraction: 0.15,
+    costPerHour: 20,
+  },
+  // ── Finance ─────────────────────────────────────────────────────────────
+  {
+    taskName: "Bookkeeping & Invoicing",
+    description:
+      "Logging expenses, categorizing transactions, chasing late invoices, and preparing clean reports for your accountant.",
+    drip: "I", dripLabel: "Invest in a Specialist",
+    roleType: "Part-time Bookkeeper",
+    whyDelegate:
+      "A bookkeeper does this faster and more accurately than you — and catches errors that cost you money. It also dramatically reduces your tax-prep stress.",
+    category: "finance",
+    keywords: ["books", "bookkeeping", "accounting", "invoices", "invoicing", "expenses", "finance", "financial", "taxes", "billing", "quickbooks", "xero"],
+    hoursFraction: 0.70,
+    costPerHour: 35,
+  },
+  {
+    taskName: "Payroll & Contractor Payments",
+    description:
+      "Processing payroll runs, tracking contractor hours, sending payments, and maintaining accurate pay records.",
+    drip: "I", dripLabel: "Invest in a Specialist",
+    roleType: "Payroll Service / HR Admin",
+    whyDelegate:
+      "Payroll errors are expensive and morale-damaging. A specialist service handles this with precision and compliance — for a fraction of what your time costs.",
+    category: "finance",
+    keywords: ["payroll", "staff", "employees", "wages", "salaries", "contractors", "hr", "paystub", "gusto", "rippling"],
+    hoursFraction: 0.30,
+    costPerHour: 35,
+  },
+  // ── Sales ───────────────────────────────────────────────────────────────
+  {
+    taskName: "CRM Data Entry & Pipeline Management",
+    description:
+      "Updating lead records, logging call notes, moving deals through pipeline stages, and keeping your CRM accurate.",
+    drip: "D", dripLabel: "Delegate",
+    roleType: "Sales Support VA",
+    whyDelegate:
+      "CRM hygiene is essential but not strategic. A sales support VA keeps your pipeline accurate while you focus on the conversations that actually close deals.",
+    category: "sales",
+    keywords: ["crm", "leads", "pipeline", "hubspot", "salesforce", "contacts", "deals", "prospects", "sales", "follow-up", "follow up"],
+    hoursFraction: 0.35,
+    costPerHour: 20,
+  },
+  {
+    taskName: "Proposal & Quote Preparation",
+    description:
+      "Building proposal documents, calculating pricing, formatting decks, and sending them for signature.",
+    drip: "R", dripLabel: "Replace with a System",
+    roleType: "EA + Proposal Software (e.g. PandaDoc, Proposify)",
+    whyDelegate:
+      "Once you build one great template, 80% of proposals write themselves. An EA running a tool like PandaDoc can produce polished proposals in under 30 minutes.",
+    category: "sales",
+    keywords: ["proposals", "quotes", "bids", "pitches", "estimates", "decks", "scope", "pricing", "proposal"],
+    hoursFraction: 0.30,
+    costPerHour: 22,
+  },
+  {
+    taskName: "Outbound Outreach & Follow-up Sequences",
+    description:
+      "Sending initial outreach emails, LinkedIn messages, and follow-up sequences to warm up new prospects.",
+    drip: "D", dripLabel: "Delegate",
+    roleType: "Sales Development Rep / VA",
+    whyDelegate:
+      "Top-of-funnel outreach is systematizable. A trained SDR or outreach VA working from your templates generates qualified conversations without eating your calendar.",
+    category: "sales",
+    keywords: ["outreach", "prospecting", "cold", "linkedin", "lead", "leads", "contact", "prospects", "sales email", "cold email"],
+    hoursFraction: 0.35,
+    costPerHour: 25,
+  },
+  // ── Relationships ───────────────────────────────────────────────────────
+  {
+    taskName: "Routine Client Check-in Emails",
+    description:
+      "Sending weekly or bi-weekly status updates to active clients, requesting feedback, and sharing project progress.",
+    drip: "D", dripLabel: "Delegate",
+    roleType: "Virtual Assistant",
+    whyDelegate:
+      "Clients value consistency, not you personally. An EA using your templates maintains the relationship warmth while you focus on the high-value conversations.",
+    category: "relationships",
+    keywords: ["check-in", "check in", "checking in", "update", "client emails", "weekly", "touchpoint", "follow up"],
+    hoursFraction: 0.40,
+    costPerHour: 18,
+  },
+  {
+    taskName: "Partnership & Vendor Coordination",
+    description:
+      "Managing back-and-forth with partners, vendors, and service providers — scheduling, follow-ups, contracts, and documentation.",
+    drip: "D", dripLabel: "Delegate",
+    roleType: "Operations Coordinator / VA",
+    whyDelegate:
+      "Most vendor coordination is logistics, not strategy. Handing this to an ops-minded EA frees you from being the bottleneck on every external relationship.",
+    category: "relationships",
+    keywords: ["partnerships", "partners", "vendors", "suppliers", "collaborations", "contractors", "coordination", "agencies"],
+    hoursFraction: 0.35,
+    costPerHour: 20,
+  },
+  {
+    taskName: "Review & Testimonial Requests",
+    description:
+      "Following up with happy clients for Google reviews, case study interviews, and referral requests.",
+    drip: "D", dripLabel: "Delegate",
+    roleType: "VA / Customer Success Coordinator",
+    whyDelegate:
+      "This is templatable and high-return but almost always falls off the list. A VA running a simple sequence captures social proof you're leaving on the table.",
+    category: "relationships",
+    keywords: ["reviews", "testimonials", "feedback", "referrals", "google", "case study", "reputation"],
+    hoursFraction: 0.20,
+    costPerHour: 18,
+  },
+];
 
-  const opsDesiredHrs = (alloc.desired.ops / 100) * WK;
-  const financeDesiredHrs = (alloc.desired.finance / 100) * WK;
-  const relDesiredHrs = (alloc.desired.relationships / 100) * WK;
+// ── Task selection ──────────────────────────────────────────────────────────
 
-  // Split ops hours across email, social, onboarding
-  const emailHrs  = Math.max(1, Math.round(opsHrs * 0.40));
-  const socialHrs = Math.max(1, Math.round(opsHrs * 0.25));
-  const onboardingHrs = Math.max(1, Math.round(opsHrs * 0.22));
-  const bookkeepingHrs = Math.max(1, Math.round(financeHrs));
-  const followupHrs = Math.max(1, Math.round(relHrs * 0.40));
+interface SelectedTask {
+  rank: number;
+  taskName: string;
+  description: string;
+  drip: string;
+  dripLabel: string;
+  roleType: string;
+  whyDelegate: string;
+  hoursPerWeek: number;
+  estimatedCostPerMonth: number;
+  timeValuePerMonth: number;
+  roi: string;
+}
 
-  // Reclaimed hours = delta on delegatable categories (cap at 35)
-  const opsReclaimed     = Math.max(0, (opsHrs - opsDesiredHrs) * 0.9);
-  const financeReclaimed = Math.max(0, financeHrs - financeDesiredHrs);
-  const relReclaimed     = Math.max(0, (relHrs - relDesiredHrs) * 0.4);
-  const totalReclaimed   = Math.min(35, Math.round(opsReclaimed + financeReclaimed + relReclaimed));
+function selectTasks(
+  alloc: Allocation | null,
+  q1Text: string
+): SelectedTask[] {
+  const lower = q1Text.toLowerCase();
 
-  return { emailHrs, socialHrs, onboardingHrs, bookkeepingHrs, followupHrs, totalReclaimed };
+  const scored = TASK_POOL.map((task) => {
+    let score = 0;
+
+    // Keyword match in Q1 answer
+    const kwHits = task.keywords.filter((k) => lower.includes(k)).length;
+    score += kwHits * 18;
+
+    if (alloc) {
+      const currentPct = ({
+        ops:           alloc.current.ops,
+        finance:       alloc.current.finance,
+        sales:         alloc.current.sales,
+        relationships: alloc.current.relationships,
+      } as Record<string, number>)[task.category] ?? 0;
+
+      const delta = Math.max(
+        0,
+        currentPct -
+          ({
+            ops:           alloc.desired.ops,
+            finance:       alloc.desired.finance,
+            sales:         alloc.desired.sales,
+            relationships: alloc.desired.relationships,
+          } as Record<string, number>)[task.category] ?? 0
+      );
+
+      score += currentPct * 0.7;   // spending a lot here = worth delegating
+      score += delta * 1.5;         // large gap = user explicitly wants less of this
+    } else {
+      // Without allocation data, lean on ops tasks as sensible defaults
+      if (task.category === "ops") score += 20;
+    }
+
+    return { task, score };
+  });
+
+  const top5 = scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+
+  const OWNER_RATE = 100; // $100/hr assumed owner time value
+
+  return top5.map(({ task }, i) => {
+    const categoryHrs = getCategoryHrs(alloc, task.category);
+    const hoursPerWeek = Math.max(1, Math.round(categoryHrs * task.hoursFraction));
+    const costPerMonth = Math.round(hoursPerWeek * 4 * task.costPerHour);
+    const valuePerMonth = Math.round(hoursPerWeek * 4 * OWNER_RATE);
+    const roiMultiple = Math.round(valuePerMonth / Math.max(1, costPerMonth));
+
+    return {
+      rank: i + 1,
+      taskName: task.taskName,
+      description: task.description,
+      drip: task.drip,
+      dripLabel: task.dripLabel,
+      roleType: task.roleType,
+      whyDelegate: task.whyDelegate,
+      hoursPerWeek,
+      estimatedCostPerMonth: costPerMonth,
+      timeValuePerMonth: valuePerMonth,
+      roi: `${roiMultiple}x return — reclaim $${valuePerMonth.toLocaleString()} of your time for $${costPerMonth.toLocaleString()}/mo`,
+    };
+  });
+}
+
+function computeTotalReclaimed(alloc: Allocation | null, tasks: SelectedTask[]): number {
+  if (!alloc) return tasks.reduce((s, t) => s + t.hoursPerWeek, 0);
+
+  const WK = 40;
+  const delta = (cur: number, des: number, scale = 1) =>
+    Math.max(0, ((cur - des) / 100) * WK * scale);
+
+  const reclaimed =
+    delta(alloc.current.ops, alloc.desired.ops, 0.9) +
+    delta(alloc.current.finance, alloc.desired.finance, 1.0) +
+    delta(alloc.current.sales, alloc.desired.sales, 0.75) +
+    delta(alloc.current.relationships, alloc.desired.relationships, 0.45);
+
+  return Math.min(35, Math.max(1, Math.round(reclaimed)));
 }
 
 // ── Routes ──────────────────────────────────────────────────────────────────
@@ -183,7 +447,6 @@ function computeTaskNumbers(alloc: Allocation | null): TaskNumbers {
 router.post("/conversation/start", (req, res) => {
   const sessionId = randomUUID();
   const firstMessage = makeMessage("assistant", QUESTIONS[0].content, "text");
-
   const session: Session = {
     sessionId,
     messages: [firstMessage],
@@ -191,24 +454,19 @@ router.post("/conversation/start", (req, res) => {
     questionCount: 0,
     isComplete: false,
   };
-
   sessions.set(sessionId, session);
   res.status(201).json(session);
 });
 
 router.get("/conversation/:sessionId", (req, res) => {
   const session = sessions.get(req.params.sessionId);
-  if (!session) {
-    return res.status(404).json({ error: "Session not found" });
-  }
+  if (!session) return res.status(404).json({ error: "Session not found" });
   res.json(session);
 });
 
 router.post("/conversation/:sessionId/message", (req, res) => {
   const session = sessions.get(req.params.sessionId);
-  if (!session) {
-    return res.status(404).json({ error: "Session not found" });
-  }
+  if (!session) return res.status(404).json({ error: "Session not found" });
 
   const { content } = req.body as { content: string };
   if (!content || !content.trim()) {
@@ -232,140 +490,44 @@ router.post("/conversation/:sessionId/message", (req, res) => {
     session.phase = "analysis";
     session.isComplete = true;
   } else {
-    const { content: nextContent, type: nextType } = buildNextMessage(
-      nextQuestionIndex,
-      content
-    );
+    const { content: nextContent, type: nextType } = buildNextMessage(nextQuestionIndex, content);
     assistantMsg = makeMessage("assistant", nextContent, nextType);
   }
 
   session.messages.push(assistantMsg);
 
-  res.json({
-    message: assistantMsg,
-    session,
-    readyForAnalysis,
-  });
+  res.json({ message: assistantMsg, session, readyForAnalysis });
 });
 
 router.post("/conversation/:sessionId/analyze", (req, res) => {
   const session = sessions.get(req.params.sessionId);
-  if (!session) {
-    return res.status(404).json({ error: "Session not found" });
-  }
+  if (!session) return res.status(404).json({ error: "Session not found" });
 
   session.phase = "complete";
 
   const alloc = parseAllocation(session.messages);
-  const t = computeTaskNumbers(alloc);
 
-  // Monthly costs by role type (hrs/week × 4 weeks × rate)
-  const emailCost        = Math.round(t.emailHrs * 4 * 22);        // EA ~$22/hr
-  const socialCost       = Math.round(t.socialHrs * 4 * 18);       // Social VA ~$18/hr
-  const onboardingCost   = Math.round(t.onboardingHrs * 4 * 22);   // EA ~$22/hr
-  const bookkeepingCost  = Math.round(t.bookkeepingHrs * 4 * 35);  // Bookkeeper ~$35/hr
-  const followupCost     = Math.round(t.followupHrs * 4 * 18);     // VA ~$18/hr
+  // Q1 answer: second message in session (index 1), first user message
+  const q1Answer =
+    session.messages.find((m) => m.role === "user")?.content ?? "";
 
-  // Owner's time value at $100/hr
-  const ownerRate = 100;
-  const emailValue       = Math.round(t.emailHrs * 4 * ownerRate);
-  const socialValue      = Math.round(t.socialHrs * 4 * ownerRate);
-  const onboardingValue  = Math.round(t.onboardingHrs * 4 * ownerRate);
-  const bookkeepingValue = Math.round(t.bookkeepingHrs * 4 * ownerRate);
-  const followupValue    = Math.round(t.followupHrs * 4 * ownerRate);
+  const tasks = selectTasks(alloc, q1Answer);
+  const totalHoursReclaimed = computeTotalReclaimed(alloc, tasks);
 
-  const roiLabel = (value: number, cost: number) =>
-    `${Math.round(value / cost)}x return — reclaim $${value.toLocaleString()} of your time for $${cost.toLocaleString()}/mo`;
-
-  const totalDelegatedCost = emailCost + socialCost + onboardingCost + bookkeepingCost + followupCost;
-  const totalTimeValue = emailValue + socialValue + onboardingValue + bookkeepingValue + followupValue;
-  const overallRoi = Math.round(totalTimeValue / totalDelegatedCost);
+  const totalCost = tasks.reduce((s, t) => s + t.estimatedCostPerMonth, 0);
+  const totalValue = tasks.reduce((s, t) => s + t.timeValuePerMonth, 0);
+  const overallRoi = Math.round(totalValue / Math.max(1, totalCost));
+  const top3Cost = tasks.slice(0, 3).reduce((s, t) => s + t.estimatedCostPerMonth, 0);
 
   const report = {
     sessionId: session.sessionId,
     founderName: "",
     businessType: "Service Business",
-    totalHoursReclaimed: t.totalReclaimed,
-    tasks: [
-      {
-        rank: 1,
-        taskName: "Email Management & Scheduling",
-        description:
-          "Triaging inbox, responding to routine inquiries, booking meetings, and sending follow-up emails — consuming your first and last hour of every day.",
-        drip: "D",
-        dripLabel: "Delegate",
-        hoursPerWeek: t.emailHrs,
-        roleType: "Executive / Virtual Assistant",
-        estimatedCostPerMonth: emailCost,
-        timeValuePerMonth: emailValue,
-        roi: roiLabel(emailValue, emailCost),
-        whyDelegate:
-          "This is high-volume, low-judgment work. A trained EA can handle 90% of your inbox with a simple decision framework. You review and approve; you don't process.",
-      },
-      {
-        rank: 2,
-        taskName: "Social Media Posting & Scheduling",
-        description:
-          "Writing captions, resizing images, posting across platforms, and responding to comments — tasks that feel strategic but are mostly execution.",
-        drip: "D",
-        dripLabel: "Delegate",
-        hoursPerWeek: t.socialHrs,
-        roleType: "Social Media VA / Content Assistant",
-        estimatedCostPerMonth: socialCost,
-        timeValuePerMonth: socialValue,
-        roi: roiLabel(socialValue, socialCost),
-        whyDelegate:
-          "You set the strategy and voice; someone else handles scheduling and posting. Batching content creation weekly with an assistant cuts this to a 30-minute review.",
-      },
-      {
-        rank: 3,
-        taskName: "Client Onboarding Admin",
-        description:
-          "Sending welcome packets, scheduling kick-off calls, collecting intake forms, and setting up project folders every time a new client signs.",
-        drip: "R",
-        dripLabel: "Replace with a System",
-        hoursPerWeek: t.onboardingHrs,
-        roleType: "EA + Automation (e.g. HoneyBook, Dubsado)",
-        estimatedCostPerMonth: onboardingCost,
-        timeValuePerMonth: onboardingValue,
-        roi: roiLabel(onboardingValue, onboardingCost),
-        whyDelegate:
-          "This is 100% repeatable. A good EA paired with a simple CRM can run your entire onboarding without you — clients still feel taken care of, and you only appear at the moments that matter.",
-      },
-      {
-        rank: 4,
-        taskName: "Bookkeeping & Invoicing",
-        description:
-          "Logging expenses, categorizing transactions, chasing late invoices, and preparing reports for your accountant.",
-        drip: "I",
-        dripLabel: "Invest in a Specialist",
-        hoursPerWeek: t.bookkeepingHrs,
-        roleType: "Part-time Bookkeeper",
-        estimatedCostPerMonth: bookkeepingCost,
-        timeValuePerMonth: bookkeepingValue,
-        roi: roiLabel(bookkeepingValue, bookkeepingCost),
-        whyDelegate:
-          "A bookkeeper does this faster and more accurately than you — and catches errors that cost you money. This also reduces your tax prep stress significantly.",
-      },
-      {
-        rank: 5,
-        taskName: "Routine Client Check-in Emails",
-        description:
-          "Sending weekly or bi-weekly status updates to existing clients, asking for feedback, and sharing project progress.",
-        drip: "D",
-        dripLabel: "Delegate",
-        hoursPerWeek: t.followupHrs,
-        roleType: "Virtual Assistant",
-        estimatedCostPerMonth: followupCost,
-        timeValuePerMonth: followupValue,
-        roi: roiLabel(followupValue, followupCost),
-        whyDelegate:
-          "Clients value consistency, not just you personally. An EA using your templates maintains the relationship warmth while you focus on the high-value conversations.",
-      },
-    ],
-    summary: `Based on your week, you're spending roughly ${t.totalReclaimed} hours on tasks that don't need you specifically. Delegating just the top three items would cost around $${(emailCost + socialCost + onboardingCost).toLocaleString()}/month and return ${overallRoi}x that in reclaimed time — immediately.`,
+    totalHoursReclaimed,
+    tasks,
+    summary: `Based on what you shared, you're spending roughly ${totalHoursReclaimed} hours a week on work that doesn't need to be yours. Delegating just the top three items on this list would cost around $${top3Cost.toLocaleString()}/month — and return ${overallRoi}x that in reclaimed time, immediately.`,
     nextStep:
-      "Start with one hire: an Executive Assistant who can own your inbox, scheduling, and client onboarding. That single decision reclaims the most time for the least coordination overhead.",
+      "Start with the highest-ranked item on this list. Pick one thing, hire or systemize for it this week, and let the momentum build. That first delegation decision is always the hardest — and the most valuable.",
   };
 
   res.json(report);
