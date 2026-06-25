@@ -16,3 +16,4 @@ export * from './message';
 export * from './messageInput';
 export * from './messageResponse';
 export * from './messageRole';
+export * from './messageType';

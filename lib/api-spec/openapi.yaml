@@ -151,6 +151,10 @@ components:
           type: string
         timestamp:
           type: string
+        type:
+          type: string
+          enum: [text, allocation_form]
+          default: text
       required:
         - id
         - role

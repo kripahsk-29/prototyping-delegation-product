@@ -6,10 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { MessageRole } from './messageRole';
+import type { MessageType } from './messageType';
 
 export interface Message {
   id: string;
   role: MessageRole;
   content: string;
   timestamp: string;
+  type?: MessageType;
 }

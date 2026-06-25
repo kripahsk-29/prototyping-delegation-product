@@ -31,12 +31,16 @@ export const SendMessageBody = zod.object({
   "content": zod.string().min(1)
 })
 
+export const sendMessageResponseMessageTypeDefault = `text`;
+export const sendMessageResponseSessionMessagesItemTypeDefault = `text`;
+
 export const SendMessageResponse = zod.object({
   "message": zod.object({
   "id": zod.string(),
   "role": zod.enum(['assistant', 'user']),
   "content": zod.string(),
-  "timestamp": zod.string()
+  "timestamp": zod.string(),
+  "type": zod.enum(['text', 'allocation_form']).default(sendMessageResponseMessageTypeDefault)
 }),
   "session": zod.object({
   "sessionId": zod.string(),
@@ -44,7 +48,8 @@ export const SendMessageResponse = zod.object({
   "id": zod.string(),
   "role": zod.enum(['assistant', 'user']),
   "content": zod.string(),
-  "timestamp": zod.string()
+  "timestamp": zod.string(),
+  "type": zod.enum(['text', 'allocation_form']).default(sendMessageResponseSessionMessagesItemTypeDefault)
 })),
   "phase": zod.enum(['intake', 'analysis', 'complete']),
   "questionCount": zod.number(),
@@ -61,13 +66,16 @@ export const GetConversationParams = zod.object({
   "sessionId": zod.coerce.string()
 })
 
+export const getConversationResponseMessagesItemTypeDefault = `text`;
+
 export const GetConversationResponse = zod.object({
   "sessionId": zod.string(),
   "messages": zod.array(zod.object({
   "id": zod.string(),
   "role": zod.enum(['assistant', 'user']),
   "content": zod.string(),
-  "timestamp": zod.string()
+  "timestamp": zod.string(),
+  "type": zod.enum(['text', 'allocation_form']).default(getConversationResponseMessagesItemTypeDefault)
 })),
   "phase": zod.enum(['intake', 'analysis', 'complete']),
   "questionCount": zod.number(),

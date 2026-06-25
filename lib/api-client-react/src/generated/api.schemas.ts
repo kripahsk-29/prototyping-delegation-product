@@ -26,11 +26,20 @@ export const MessageRole = {
   user: 'user',
 } as const;
 
+export type MessageType = typeof MessageType[keyof typeof MessageType];
+
+
+export const MessageType = {
+  text: 'text',
+  allocation_form: 'allocation_form',
+} as const;
+
 export interface Message {
   id: string;
   role: MessageRole;
   content: string;
   timestamp: string;
+  type?: MessageType;
 }
 
 export interface ConversationSession {

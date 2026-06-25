@@ -8,6 +8,7 @@ interface Message {
   role: "assistant" | "user";
   content: string;
   timestamp: string;
+  type?: "text" | "allocation_form";
 }
 
 interface Session {
@@ -18,22 +19,48 @@ interface Session {
   isComplete: boolean;
 }
 
+interface QuestionDef {
+  content: string;
+  msgType: "text" | "allocation_form";
+}
+
 const sessions = new Map<string, Session>();
 
-const QUESTIONS = [
-  "Hey there — let's figure out what's eating your time. Walk me through a typical week: what are you spending your time on, day to day?",
-  "Got it. Now flip that around — if you had a completely clear day with zero tasks on your plate, how would you spend it to actually grow your business?",
-  "Of everything you've mentioned, roughly how many hours a week do you spend on email, scheduling, admin tasks, or anything that feels repetitive?",
-  "Which of those tasks feel like only *you* can handle them — where your specific judgment, relationships, or expertise really matters? And which ones do you do just because no one else is doing them?",
-  "Last question: how many people are currently on your team? And have you ever tried delegating before — if so, what happened?",
+// 4 turns total: Q1 (text), Q2 (text), Q3 (allocation_form), Q4 (text)
+const QUESTIONS: QuestionDef[] = [
+  {
+    content:
+      "Hey there — let's figure out what's eating your time. Walk me through a typical week: what are you spending your time on, day to day?",
+    msgType: "text",
+  },
+  {
+    content:
+      "Got it. Now flip that around — if you had a completely clear day with zero tasks on your plate, how would you spend it to actually grow your business?",
+    msgType: "text",
+  },
+  {
+    content:
+      "While running your business, approximately what percentage of your time do you currently spend — and would like to spend — on the following activities?",
+    msgType: "allocation_form",
+  },
+  {
+    content:
+      "Last question: how many people are currently on your team? And have you ever tried delegating before — if so, what happened?",
+    msgType: "text",
+  },
 ];
 
-function makeMessage(role: "assistant" | "user", content: string): Message {
+function makeMessage(
+  role: "assistant" | "user",
+  content: string,
+  type: "text" | "allocation_form" = "text"
+): Message {
   return {
     id: randomUUID(),
     role,
     content,
     timestamp: new Date().toISOString(),
+    type,
   };
 }
 
@@ -44,39 +71,39 @@ function extractSnippet(text: string, maxWords = 6): string {
   return words.length > maxWords ? slice + "…" : slice;
 }
 
-function buildNextMessage(nextQuestionIndex: number, userAnswer: string): string {
-  const snippet = extractSnippet(userAnswer);
+function buildNextMessage(
+  nextQuestionIndex: number,
+  userAnswer: string
+): { content: string; type: "text" | "allocation_form" } {
   const nextQ = QUESTIONS[nextQuestionIndex];
+  const snippet = extractSnippet(userAnswer);
 
-  // Each bridge acknowledges something specific about what they just said,
-  // then flows naturally into the next question.
   const bridges: Record<number, (s: string) => string> = {
+    // After Q1 (typical week) → Q2 (ideal day)
     1: (s) =>
-      `"${s}" — sounds like your week is full before it even starts. That's actually really useful context.\n\n` + nextQ,
+      `"${s}" — sounds like your week is full before it even starts. That's really useful context.\n\n` +
+      nextQ.content,
 
+    // After Q2 (ideal day) → Q3 (allocation form)
     2: (s) =>
-      `That's a clear picture of where you want your energy going. Keeping "${s}" in mind — ` + nextQ,
+      `That's a clear picture of where you want your energy going. Keeping "${s}" in mind — let's get specific about where your time actually goes right now:`,
 
-    3: (s) => {
-      // Try to extract a number from their answer for a more personal touch
-      const numMatch = userAnswer.match(/\b(\d+)\b/);
-      const hoursRef = numMatch
-        ? `Those ${numMatch[1]} hours`
-        : `That time you described — "${s}"`;
-      return `${hoursRef} is exactly the kind of thing we want to put a plan around.\n\n` + nextQ;
-    },
-
-    4: (s) =>
-      `That's a really useful distinction — knowing what's genuinely yours versus what just ended up on your plate. One last thing:\n\n` + nextQ,
+    // After Q3 form submission → Q4 (team + prior delegation)
+    3: () =>
+      `That breakdown is really telling — the gap between current and desired is exactly where we focus.\n\nOne last thing:\n\n` +
+      nextQ.content,
   };
 
   const bridge = bridges[nextQuestionIndex];
-  return bridge ? bridge(snippet) : nextQ;
+  // For allocation_form, the bridge IS the full content (widget renders the form)
+  const content = bridge ? bridge(snippet) : nextQ.content;
+
+  return { content, type: nextQ.msgType };
 }
 
 router.post("/conversation/start", (req, res) => {
   const sessionId = randomUUID();
-  const firstMessage = makeMessage("assistant", QUESTIONS[0]);
+  const firstMessage = makeMessage("assistant", QUESTIONS[0].content, "text");
 
   const session: Session = {
     sessionId,
@@ -121,12 +148,16 @@ router.post("/conversation/:sessionId/message", (req, res) => {
   if (readyForAnalysis) {
     assistantMsg = makeMessage(
       "assistant",
-      "Thank you for sharing all of that — I have a really clear picture of your week now. Give me just a moment to map everything through the DRIP framework and build your personalized delegation plan..."
+      "Thank you for sharing all of that — I have a really clear picture now. Give me just a moment to map everything through the DRIP framework and build your personalized delegation plan..."
     );
     session.phase = "analysis";
     session.isComplete = true;
   } else {
-    assistantMsg = makeMessage("assistant", buildNextMessage(nextQuestionIndex, content));
+    const { content: nextContent, type: nextType } = buildNextMessage(
+      nextQuestionIndex,
+      content
+    );
+    assistantMsg = makeMessage("assistant", nextContent, nextType);
   }
 
   session.messages.push(assistantMsg);
