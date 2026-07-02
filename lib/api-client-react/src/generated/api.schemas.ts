@@ -32,6 +32,7 @@ export type MessageType = typeof MessageType[keyof typeof MessageType];
 export const MessageType = {
   text: 'text',
   allocation_form: 'allocation_form',
+  energy_form: 'energy_form',
 } as const;
 
 export interface Message {
@@ -83,6 +84,8 @@ export interface DelegationTask {
   timeValuePerMonth: number;
   roi: string;
   whyDelegate: string;
+  /** Route + role: e.g. 'Existing team member: Ops Manager' or 'System: HoneyBook' or 'External hire: VA' */
+  whoTakesIt: string;
 }
 
 export interface DelegationReport {
@@ -96,8 +99,10 @@ export interface DelegationReport {
   buybackRate?: number;
   /** Martell's 1/4 Rule: max hourly delegation cost (buybackRate / 4) */
   quarterRate?: number;
-  /** User-provided annual revenue or income */
+  /** User-provided personal take-home or target income */
   annualIncome?: number;
+  /** Placeholder tier assignment (e.g. Starter, Growth, Scale) — pending Ashley definition */
+  elevateTier?: string;
   tasks: DelegationTask[];
   summary: string;
   nextStep: string;

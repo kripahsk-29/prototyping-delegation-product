@@ -40,7 +40,7 @@ export const SendMessageResponse = zod.object({
   "role": zod.enum(['assistant', 'user']),
   "content": zod.string(),
   "timestamp": zod.string(),
-  "type": zod.enum(['text', 'allocation_form']).default(sendMessageResponseMessageTypeDefault)
+  "type": zod.enum(['text', 'allocation_form', 'energy_form']).default(sendMessageResponseMessageTypeDefault)
 }),
   "session": zod.object({
   "sessionId": zod.string(),
@@ -49,7 +49,7 @@ export const SendMessageResponse = zod.object({
   "role": zod.enum(['assistant', 'user']),
   "content": zod.string(),
   "timestamp": zod.string(),
-  "type": zod.enum(['text', 'allocation_form']).default(sendMessageResponseSessionMessagesItemTypeDefault)
+  "type": zod.enum(['text', 'allocation_form', 'energy_form']).default(sendMessageResponseSessionMessagesItemTypeDefault)
 })),
   "phase": zod.enum(['intake', 'analysis', 'complete']),
   "questionCount": zod.number(),
@@ -75,7 +75,7 @@ export const GetConversationResponse = zod.object({
   "role": zod.enum(['assistant', 'user']),
   "content": zod.string(),
   "timestamp": zod.string(),
-  "type": zod.enum(['text', 'allocation_form']).default(getConversationResponseMessagesItemTypeDefault)
+  "type": zod.enum(['text', 'allocation_form', 'energy_form']).default(getConversationResponseMessagesItemTypeDefault)
 })),
   "phase": zod.enum(['intake', 'analysis', 'complete']),
   "questionCount": zod.number(),
@@ -97,7 +97,8 @@ export const AnalyzeConversationResponse = zod.object({
   "totalHoursReclaimed": zod.number(),
   "buybackRate": zod.number().optional().describe('Owner\'s hourly time value (annual income \/ 2000)'),
   "quarterRate": zod.number().optional().describe('Martell\'s 1\/4 Rule: max hourly delegation cost (buybackRate \/ 4)'),
-  "annualIncome": zod.number().optional().describe('User-provided annual revenue or income'),
+  "annualIncome": zod.number().optional().describe('User-provided personal take-home or target income'),
+  "elevateTier": zod.string().optional().describe('Placeholder tier assignment (e.g. Starter, Growth, Scale) — pending Ashley definition'),
   "tasks": zod.array(zod.object({
   "rank": zod.number(),
   "taskName": zod.string(),
@@ -109,7 +110,8 @@ export const AnalyzeConversationResponse = zod.object({
   "estimatedCostPerMonth": zod.number(),
   "timeValuePerMonth": zod.number(),
   "roi": zod.string(),
-  "whyDelegate": zod.string()
+  "whyDelegate": zod.string(),
+  "whoTakesIt": zod.string().describe('Route + role: e.g. \'Existing team member: Ops Manager\' or \'System: HoneyBook\' or \'External hire: VA\'')
 })),
   "summary": zod.string(),
   "nextStep": zod.string()

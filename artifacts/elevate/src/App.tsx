@@ -239,6 +239,107 @@ function AllocationFormWidget({
   );
 }
 
+// ── Energy form widget ───────────────────────────────────────────────────────
+
+const ENERGY_ROWS = [
+  { label: "Day-to-day Operations", key: "ops",           submitLabel: "Operations" },
+  { label: "Business Strategy",      key: "strategy",     submitLabel: "Strategy" },
+  { label: "Relationships & Partnerships", key: "relationships", submitLabel: "Relationships" },
+  { label: "Sales",                  key: "sales",        submitLabel: "Sales" },
+  { label: "Finance / Accounting",   key: "finance",      submitLabel: "Finance" },
+];
+
+const ENERGY_COLORS = [
+  { bg: "bg-red-400",    text: "text-white",       label: "Drains me" },
+  { bg: "bg-orange-300", text: "text-orange-900",  label: "" },
+  { bg: "bg-[#e8e4d4]", text: "text-foreground",  label: "Neutral" },
+  { bg: "bg-green-200",  text: "text-green-900",   label: "" },
+  { bg: "bg-green-500",  text: "text-white",       label: "Energizes me" },
+];
+
+function EnergyFormWidget({ onSubmit }: { onSubmit: (formatted: string) => void }) {
+  const [ratings, setRatings] = useState<Record<string, number>>({});
+  const [submitted, setSubmitted] = useState(false);
+
+  const allRated = ENERGY_ROWS.every((r) => ratings[r.key] !== undefined);
+
+  const handleSubmit = () => {
+    if (!allRated || submitted) return;
+    const parts = ENERGY_ROWS.map((r) => `${r.submitLabel}: ${ratings[r.key]}`).join(", ");
+    const formatted = `Energy ratings — ${parts}`;
+    setSubmitted(true);
+    onSubmit(formatted);
+  };
+
+  if (submitted) {
+    return (
+      <div className="flex items-center gap-2 text-primary text-sm font-medium mt-2 px-1">
+        <Check className="w-4 h-4" />
+        Energy ratings submitted
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 bg-background border border-border/60 rounded-2xl overflow-hidden shadow-sm">
+      {/* Legend */}
+      <div className="flex items-center justify-between px-4 py-3 bg-muted/60 border-b border-border/40">
+        <span className="text-xs font-medium text-muted-foreground">Area</span>
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          <span className="text-red-500 font-medium">1 — Drains me</span>
+          <span className="mx-2 text-border">·</span>
+          <span className="text-green-600 font-medium">5 — Energizes me</span>
+        </div>
+      </div>
+
+      {/* Rows */}
+      <div className="divide-y divide-border/30">
+        {ENERGY_ROWS.map((row) => (
+          <div key={row.key} className="flex items-center gap-3 px-4 py-3">
+            <span className="text-sm text-foreground/80 flex-1 min-w-0">{row.label}</span>
+            <div className="flex gap-1.5 shrink-0">
+              {ENERGY_COLORS.map((c, i) => {
+                const val = i + 1;
+                const selected = ratings[row.key] === val;
+                return (
+                  <button
+                    key={val}
+                    onClick={() => setRatings((prev) => ({ ...prev, [row.key]: val }))}
+                    className={cn(
+                      "w-8 h-8 rounded-full text-xs font-semibold transition-all duration-150 border-2",
+                      selected
+                        ? `${c.bg} ${c.text} border-transparent scale-110 shadow-md`
+                        : "bg-muted/40 text-muted-foreground border-transparent hover:border-border hover:scale-105"
+                    )}
+                    title={c.label || String(val)}
+                  >
+                    {val}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Submit */}
+      <div className="px-4 py-3 flex items-center justify-between gap-3 border-t border-border/40">
+        <p className="text-xs text-muted-foreground">
+          {allRated ? "All areas rated — ready to submit" : `Rate all ${ENERGY_ROWS.length} areas to continue`}
+        </p>
+        <Button
+          onClick={handleSubmit}
+          disabled={!allRated}
+          size="sm"
+          className="rounded-full px-5 bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-40"
+        >
+          Submit
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // ── Report sub-components ───────────────────────────────────────────────────
 
 function TimeMapNow({ report }: { report: DelegationReport }) {

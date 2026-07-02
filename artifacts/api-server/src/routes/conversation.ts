@@ -8,7 +8,7 @@ interface Message {
   role: "assistant" | "user";
   content: string;
   timestamp: string;
-  type?: "text" | "allocation_form";
+  type?: "text" | "allocation_form" | "energy_form";
 }
 
 interface Session {
@@ -21,36 +21,49 @@ interface Session {
 
 interface QuestionDef {
   content: string;
-  msgType: "text" | "allocation_form";
+  msgType: "text" | "allocation_form" | "energy_form";
 }
 
 const sessions = new Map<string, Session>();
 
-// 5 turns: Q1 (text), Q2 (text), Q3 (allocation_form), Q4 (income), Q5 (team)
+// 7 questions following the v1 spec:
+// Q1: Business context  Q2: Existing team  Q3: Week tasks (text)
+// Q4: Time per task (allocation_form)  Q5: Energy (energy_form)
+// Q6: Value (text)  Q7: History + take-home income (text)
 const QUESTIONS: QuestionDef[] = [
   {
     content:
-      "Hey there — let's figure out what's eating your time. Walk me through a typical week: what are you spending your time on, day to day?",
+      "Let's start with some context. Tell me about your business — what you do, what stage you're at, what industry, and roughly how big the operation is today.",
     msgType: "text",
   },
   {
     content:
-      "Now flip that around — if you had a completely clear day with zero tasks on your plate, how would you spend it to actually grow your business?",
+      "Who's already on your team — even part-time or contract? Walk me through who's there and what each person actually owns day to day.",
     msgType: "text",
   },
   {
     content:
-      "While running your business, approximately what percentage of your time do you currently spend — and would like to spend — on the following activities?",
+      "Now let's get into your week. Walk me through Monday to Friday — what actually lands on your plate? Just list it out, everything that you're doing.",
+    msgType: "text",
+  },
+  {
+    content:
+      "For each area below, roughly how much of your time do you currently spend on it — and how much would you like to spend? Both columns must add up to 100%.",
     msgType: "allocation_form",
   },
   {
     content:
-      "One more piece of the puzzle: roughly what's your annual business revenue, or how much are you personally targeting to earn this year? A ballpark is totally fine — this lets us calculate exactly what your time is actually worth.",
+      "Now for the same areas — on a scale of 1 to 5, how do these feel? 1 means it drains you completely. 5 means it genuinely energizes you.",
+    msgType: "energy_form",
+  },
+  {
+    content:
+      "Looking at that same list — which of these tasks can only you do well? And which ones could someone else handle, with the right guidance?",
     msgType: "text",
   },
   {
     content:
-      "Last question: how many people are currently on your team? And have you ever tried delegating before — if so, what happened?",
+      "Last one. Have you tried delegating before? What worked, and what got in the way? And what's your personal take-home or target income — even a ballpark is fine. That's what lets us put a real number on what your time is worth.",
     msgType: "text",
   },
 ];
@@ -58,7 +71,7 @@ const QUESTIONS: QuestionDef[] = [
 function makeMessage(
   role: "assistant" | "user",
   content: string,
-  type: "text" | "allocation_form" = "text"
+  type: "text" | "allocation_form" | "energy_form" = "text"
 ): Message {
   return {
     id: randomUUID(),
@@ -70,66 +83,54 @@ function makeMessage(
 }
 
 function buildNextMessage(
-  nextQuestionIndex: number,
+  nextIdx: number,
   userAnswer: string
-): { content: string; type: "text" | "allocation_form" } {
-  const nextQ = QUESTIONS[nextQuestionIndex];
+): { content: string; type: "text" | "allocation_form" | "energy_form" } {
+  const nextQ = QUESTIONS[nextIdx];
 
   const bridges: Record<number, () => string> = {
-    // After Q1 → Q2
-    1: () => {
-      const wordCount = userAnswer.trim().split(/\s+/).length;
-      const opener =
-        wordCount > 30
-          ? "That's a lot to be carrying — and it paints a very clear picture."
-          : "Got it — that's really useful to know.";
-      return `${opener}\n\n` + nextQ.content;
+    // After Q1 (context) → Q2 (team)
+    1: () => `Good context — that helps a lot.\n\n${nextQ.content}`,
+    // After Q2 (team) → Q3 (week tasks)
+    2: () => `Got it — knowing who's already there changes everything.\n\n${nextQ.content}`,
+    // After Q3 (week) → Q4 (allocation form)
+    3: () => {
+      const wc = userAnswer.trim().split(/\s+/).length;
+      const opener = wc > 40
+        ? "That's a full plate — and a clear picture of where your time is going."
+        : "That's useful — I can already see some patterns there.";
+      return `${opener}\n\nNow let's put some numbers on it:`;
     },
-    // After Q2 → Q3 (allocation form)
-    2: () => `That's a clear vision. Now let's map out where your time actually goes today:`,
-    // After Q3 form → Q4 (income)
-    3: () =>
-      `That breakdown is really telling. The gap between where you are and where you want to be is exactly what we'll close.\n\n` +
-      nextQ.content,
-    // After Q4 income → Q5 (team)
-    4: () =>
-      `Perfect — that gives us everything we need to be precise with the numbers.\n\n` +
-      nextQ.content,
+    // After Q4 (allocation) → Q5 (energy form)
+    4: () => `That time breakdown is really telling. Now I want to understand how these areas actually feel:`,
+    // After Q5 (energy) → Q6 (value)
+    5: () => `That energy map is really valuable data. One more angle:\n\n${nextQ.content}`,
+    // After Q6 (value) → Q7 (history + income)
+    6: () => `That distinction — what only you can do versus what anyone could — is exactly what shapes the plan.\n\n${nextQ.content}`,
   };
 
-  const bridge = bridges[nextQuestionIndex];
+  const bridge = bridges[nextIdx];
   const content = bridge ? bridge() : nextQ.content;
   return { content, type: nextQ.msgType };
 }
 
-// ── Income parsing (Martell Buyback Rate) ───────────────────────────────────
+// ── Parsers ─────────────────────────────────────────────────────────────────
 
 function parseIncome(text: string): number | null {
   const cleaned = text.toLowerCase().replace(/,/g, "").replace(/\$/g, "");
-
-  // "1.5 million" / "1.5m"
   const millionMatch = cleaned.match(/(\d+\.?\d*)\s*(?:million|m\b)/);
   if (millionMatch) return Math.round(parseFloat(millionMatch[1]) * 1_000_000);
-
-  // "200k" / "200 thousand"
   const kMatch = cleaned.match(/(\d+\.?\d*)\s*(?:k\b|thousand)/);
   if (kMatch) return Math.round(parseFloat(kMatch[1]) * 1_000);
-
-  // Plain number >= 10,000 (e.g. "200000")
   const bigMatch = cleaned.match(/\b(\d{5,})\b/);
   if (bigMatch) return parseInt(bigMatch[1]);
-
-  // 3-4 digit number — treat as thousands (e.g. "200" → $200k, "85" → $85k)
   const smallMatch = cleaned.match(/\b(\d{2,4})\b/);
   if (smallMatch) {
     const n = parseInt(smallMatch[1]);
     if (n >= 20) return n * 1_000;
   }
-
   return null;
 }
-
-// ── Allocation parsing ──────────────────────────────────────────────────────
 
 function parsePct(text: string, keywords: string[]): number {
   const lower = text.toLowerCase();
@@ -153,10 +154,9 @@ function parseAllocation(messages: Message[]): Allocation | null {
     (m) => m.role === "user" && m.content.includes("Currently spending:")
   );
   if (!msg) return null;
-
   const [currentPart = "", desiredPart = ""] = msg.content.split("Would like to spend:");
   const extract = (text: string) => ({
-    ops:           parsePct(text, ["day-to-day operations", "operations"]),
+    ops:           parsePct(text, ["day-to-day operations", "Handling day-to-day", "operations"]),
     strategy:      parsePct(text, ["business strategy", "strategy"]),
     relationships: parsePct(text, ["relationships / partnerships", "relationships"]),
     sales:         parsePct(text, ["sales"]),
@@ -165,22 +165,85 @@ function parseAllocation(messages: Message[]): Allocation | null {
   return { current: extract(currentPart), desired: extract(desiredPart) };
 }
 
-function getCategoryHrs(alloc: Allocation | null, category: string): number {
-  const WK = 40;
-  if (!alloc) {
-    const defaults: Record<string, number> = {
-      ops: 16, finance: 3, sales: 5, relationships: 6, strategy: 10,
-    };
-    return defaults[category] ?? 5;
+// Parse energy scores from the energy_form submission
+// Format: "Energy ratings — Operations: 2, Strategy: 5, Relationships: 4, Sales: 3, Finance: 1"
+function parseEnergy(messages: Message[]): Record<string, number> {
+  const msg = messages.find(
+    (m) => m.role === "user" && m.content.includes("Energy ratings")
+  );
+  if (!msg) return {};
+  const result: Record<string, number> = {};
+  const matches = msg.content.matchAll(/([A-Za-z\s\/]+):\s*(\d)/g);
+  for (const m of matches) {
+    const key = m[1].trim().toLowerCase();
+    const val = parseInt(m[2]);
+    if (key.includes("oper")) result.ops = val;
+    else if (key.includes("strateg")) result.strategy = val;
+    else if (key.includes("relat")) result.relationships = val;
+    else if (key.includes("sale")) result.sales = val;
+    else if (key.includes("financ") || key.includes("account")) result.finance = val;
   }
-  const pctMap: Record<string, number> = {
-    ops:           alloc.current.ops,
-    strategy:      alloc.current.strategy,
-    relationships: alloc.current.relationships,
-    sales:         alloc.current.sales,
-    finance:       alloc.current.finance,
+  return result;
+}
+
+// Detect roles already on the team from Q2 text
+function parseTeamRoles(q2Text: string): Set<string> {
+  const lower = q2Text.toLowerCase();
+  const roles = new Set<string>();
+  if (lower.match(/ops|operations manager|operations/)) roles.add("ops");
+  if (lower.match(/marketing|social media|content/)) roles.add("marketing");
+  if (lower.match(/bookkeeper|accountant|finance|accounting/)) roles.add("finance");
+  if (lower.match(/va|virtual assistant|admin assistant/)) roles.add("va");
+  if (lower.match(/sales|biz dev|business development/)) roles.add("sales");
+  if (lower.match(/project manager|pm|coordinator/)) roles.add("pm");
+  if (lower.match(/customer service|support/)) roles.add("support");
+  return roles;
+}
+
+// Determine the who_takes_it route given a task and team context
+function routeWhoTakesIt(
+  task: TaskTemplate,
+  teamRoles: Set<string>,
+  energyScore: number
+): string {
+  // System/automation route for R-tagged tasks
+  const systemTools: Record<string, string> = {
+    "Client Onboarding Administration": "System: HoneyBook or Dubsado",
+    "Proposal & Quote Preparation":     "System: PandaDoc or Proposify",
+    "CRM Data Entry & Pipeline Management": "System: HubSpot automation",
   };
-  return ((pctMap[category] ?? 0) / 100) * WK;
+  if (task.drip === "R" && systemTools[task.taskName]) {
+    return systemTools[task.taskName];
+  }
+
+  // Check existing team first
+  const teamMatch: Record<string, string[]> = {
+    ops:       ["Email & Inbox Management", "Calendar & Meeting Scheduling", "Project Status Updates & Reporting", "Client Onboarding Administration"],
+    marketing: ["Social Media Posting & Management"],
+    finance:   ["Bookkeeping & Invoicing", "Payroll & Contractor Payments"],
+    va:        ["Email & Inbox Management", "Calendar & Meeting Scheduling", "Routine Client Check-in Emails", "Review & Testimonial Requests"],
+    sales:     ["CRM Data Entry & Pipeline Management", "Outbound Outreach & Follow-up Sequences", "Proposal & Quote Preparation"],
+    pm:        ["Project Status Updates & Reporting", "Client Onboarding Administration", "Partnership & Vendor Coordination"],
+    support:   ["Routine Client Check-in Emails", "Review & Testimonial Requests"],
+  };
+
+  for (const [role, tasks] of Object.entries(teamMatch)) {
+    if (teamRoles.has(role) && tasks.includes(task.taskName)) {
+      const roleLabel: Record<string, string> = {
+        ops:       "Operations Manager",
+        marketing: "Marketing / Content person",
+        finance:   "Bookkeeper / Accountant",
+        va:        "Virtual Assistant",
+        sales:     "Sales person",
+        pm:        "Project Manager / Coordinator",
+        support:   "Customer Support person",
+      };
+      return `Existing team member: ${roleLabel[role]}`;
+    }
+  }
+
+  // External hire
+  return `External hire: ${task.roleType}`;
 }
 
 // ── Task pool ───────────────────────────────────────────────────────────────
@@ -195,12 +258,10 @@ interface TaskTemplate {
   category: "ops" | "finance" | "sales" | "relationships";
   keywords: string[];
   hoursFraction: number;
-  /** Market rate for the role (hourly) */
   marketRatePerHour: number;
 }
 
 const TASK_POOL: TaskTemplate[] = [
-  // ── Operations ─────────────────────────────────────────────────────────
   {
     taskName: "Email & Inbox Management",
     description:
@@ -266,7 +327,6 @@ const TASK_POOL: TaskTemplate[] = [
     hoursFraction: 0.15,
     marketRatePerHour: 20,
   },
-  // ── Finance ─────────────────────────────────────────────────────────────
   {
     taskName: "Bookkeeping & Invoicing",
     description:
@@ -293,12 +353,11 @@ const TASK_POOL: TaskTemplate[] = [
     hoursFraction: 0.30,
     marketRatePerHour: 35,
   },
-  // ── Sales ───────────────────────────────────────────────────────────────
   {
     taskName: "CRM Data Entry & Pipeline Management",
     description:
       "Updating lead records, logging call notes, moving deals through pipeline stages, and keeping your CRM accurate.",
-    drip: "D", dripLabel: "Delegate",
+    drip: "R", dripLabel: "Replace with a System",
     roleType: "Sales Support VA",
     whyDelegate:
       "CRM hygiene is essential but not strategic. A sales support VA keeps your pipeline accurate while you focus on the conversations that actually close deals.",
@@ -333,7 +392,6 @@ const TASK_POOL: TaskTemplate[] = [
     hoursFraction: 0.35,
     marketRatePerHour: 25,
   },
-  // ── Relationships ───────────────────────────────────────────────────────
   {
     taskName: "Routine Client Check-in Emails",
     description:
@@ -385,44 +443,71 @@ interface SelectedTask {
   dripLabel: string;
   roleType: string;
   whyDelegate: string;
+  whoTakesIt: string;
   hoursPerWeek: number;
   estimatedCostPerMonth: number;
   timeValuePerMonth: number;
   roi: string;
 }
 
+function getCategoryHrs(alloc: Allocation | null, category: string): number {
+  const WK = 40;
+  if (!alloc) {
+    const defaults: Record<string, number> = { ops: 16, finance: 3, sales: 5, relationships: 6 };
+    return defaults[category] ?? 5;
+  }
+  const pctMap: Record<string, number> = {
+    ops:           alloc.current.ops,
+    strategy:      alloc.current.strategy,
+    relationships: alloc.current.relationships,
+    sales:         alloc.current.sales,
+    finance:       alloc.current.finance,
+  };
+  return ((pctMap[category] ?? 0) / 100) * WK;
+}
+
 function selectTasks(
   alloc: Allocation | null,
-  q1Text: string,
+  weekText: string,
+  energy: Record<string, number>,
+  teamRoles: Set<string>,
   buybackRate: number
 ): SelectedTask[] {
-  const lower = q1Text.toLowerCase();
+  const lower = weekText.toLowerCase();
 
   const scored = TASK_POOL.map((task) => {
     let score = 0;
+
+    // Keyword match on week text (Q3)
     const kwHits = task.keywords.filter((k) => lower.includes(k)).length;
     score += kwHits * 18;
 
     if (alloc) {
-      const catPctMap: Record<string, number> = {
-        ops:           alloc.current.ops,
-        finance:       alloc.current.finance,
-        sales:         alloc.current.sales,
-        relationships: alloc.current.relationships,
+      const catPct: Record<string, number> = {
+        ops: alloc.current.ops, finance: alloc.current.finance,
+        sales: alloc.current.sales, relationships: alloc.current.relationships,
       };
-      const desPctMap: Record<string, number> = {
-        ops:           alloc.desired.ops,
-        finance:       alloc.desired.finance,
-        sales:         alloc.desired.sales,
-        relationships: alloc.desired.relationships,
+      const desPct: Record<string, number> = {
+        ops: alloc.desired.ops, finance: alloc.desired.finance,
+        sales: alloc.desired.sales, relationships: alloc.desired.relationships,
       };
-      const currentPct = catPctMap[task.category] ?? 0;
-      const desiredPct = desPctMap[task.category] ?? 0;
-      const delta = Math.max(0, currentPct - desiredPct);
-      score += currentPct * 0.7;
-      score += delta * 1.5;
+      const cur = catPct[task.category] ?? 0;
+      const des = desPct[task.category] ?? 0;
+      score += cur * 0.7;
+      score += Math.max(0, cur - des) * 1.5;
     } else {
       if (task.category === "ops") score += 20;
+    }
+
+    // Energy score: low energy (1-2) in a category → big boost to tasks in that category
+    const eCat: Record<string, string> = {
+      ops: "ops", finance: "finance", sales: "sales", relationships: "relationships",
+    };
+    const energyKey = eCat[task.category];
+    if (energyKey && energy[energyKey] !== undefined) {
+      const e = energy[energyKey];
+      if (e <= 2) score += 25;       // draining → prioritize delegating
+      else if (e >= 4) score -= 10;  // energizing → maybe keep it
     }
 
     return { task, score };
@@ -433,15 +518,11 @@ function selectTasks(
   return top5.map(({ task }, i) => {
     const categoryHrs = getCategoryHrs(alloc, task.category);
     const hoursPerWeek = Math.max(1, Math.round(categoryHrs * task.hoursFraction));
-
-    // Martell's formula:
-    //   value  = hours × buybackRate (what the owner's time is actually worth)
-    //   cost   = hours × marketRatePerHour (what the delegatee gets paid)
-    //   roi    = buybackRate / marketRatePerHour
     const weeksPerMonth = 4;
     const valuePerMonth = Math.round(hoursPerWeek * weeksPerMonth * buybackRate);
     const costPerMonth  = Math.round(hoursPerWeek * weeksPerMonth * task.marketRatePerHour);
     const roiMultiple   = Math.round(buybackRate / task.marketRatePerHour);
+    const whoTakesIt    = routeWhoTakesIt(task, teamRoles, energy[task.category] ?? 3);
 
     return {
       rank: i + 1,
@@ -451,6 +532,7 @@ function selectTasks(
       dripLabel: task.dripLabel,
       roleType: task.roleType,
       whyDelegate: task.whyDelegate,
+      whoTakesIt,
       hoursPerWeek,
       estimatedCostPerMonth: costPerMonth,
       timeValuePerMonth: valuePerMonth,
@@ -462,14 +544,20 @@ function selectTasks(
 function computeTotalReclaimed(alloc: Allocation | null, tasks: SelectedTask[]): number {
   if (!alloc) return tasks.reduce((s, t) => s + t.hoursPerWeek, 0);
   const WK = 40;
-  const delta = (cur: number, des: number, scale = 1) =>
-    Math.max(0, ((cur - des) / 100) * WK * scale);
+  const delta = (cur: number, des: number, scale = 1) => Math.max(0, ((cur - des) / 100) * WK * scale);
   const reclaimed =
     delta(alloc.current.ops, alloc.desired.ops, 0.9) +
     delta(alloc.current.finance, alloc.desired.finance, 1.0) +
     delta(alloc.current.sales, alloc.desired.sales, 0.75) +
     delta(alloc.current.relationships, alloc.desired.relationships, 0.45);
   return Math.min(35, Math.max(1, Math.round(reclaimed)));
+}
+
+// Placeholder tier — pending Ashley's definition
+function computeElevateTier(buybackRate: number): string {
+  if (buybackRate < 40) return "Elevate Starter";
+  if (buybackRate < 100) return "Elevate Growth";
+  return "Elevate Scale";
 }
 
 // ── Routes ──────────────────────────────────────────────────────────────────
@@ -499,16 +587,14 @@ router.post("/conversation/:sessionId/message", (req, res) => {
   if (!session) return res.status(404).json({ error: "Session not found" });
 
   const { content } = req.body as { content: string };
-  if (!content || !content.trim()) {
-    return res.status(400).json({ error: "Content is required" });
-  }
+  if (!content || !content.trim()) return res.status(400).json({ error: "Content is required" });
 
   const userMsg = makeMessage("user", content);
   session.messages.push(userMsg);
   session.questionCount += 1;
 
-  const nextQuestionIndex = session.questionCount;
-  const readyForAnalysis = nextQuestionIndex >= QUESTIONS.length;
+  const nextIdx = session.questionCount;
+  const readyForAnalysis = nextIdx >= QUESTIONS.length;
 
   let assistantMsg: Message;
 
@@ -520,10 +606,7 @@ router.post("/conversation/:sessionId/message", (req, res) => {
     session.phase = "analysis";
     session.isComplete = true;
   } else {
-    const { content: nextContent, type: nextType } = buildNextMessage(
-      nextQuestionIndex,
-      content
-    );
+    const { content: nextContent, type: nextType } = buildNextMessage(nextIdx, content);
     assistantMsg = makeMessage("assistant", nextContent, nextType);
   }
 
@@ -534,30 +617,33 @@ router.post("/conversation/:sessionId/message", (req, res) => {
 router.post("/conversation/:sessionId/analyze", (req, res) => {
   const session = sessions.get(req.params.sessionId);
   if (!session) return res.status(404).json({ error: "Session not found" });
-
   session.phase = "complete";
 
-  const alloc = parseAllocation(session.messages);
-  const q1Answer = session.messages.find((m) => m.role === "user")?.content ?? "";
-
-  // Find Q4 (income) answer — the second user text message after the allocation form
   const userMessages = session.messages.filter((m) => m.role === "user");
-  // userMessages[0] = Q1, [1] = Q2, [2] = allocation form, [3] = income, [4] = team
-  const incomeText = userMessages[3]?.content ?? "";
-  const annualIncome = parseIncome(incomeText) ?? 100_000; // fallback only if truly unparseable
+  // userMessages: [0]=Q1 context, [1]=Q2 team, [2]=Q3 week,
+  //               [3]=Q4 allocation form, [4]=Q5 energy form,
+  //               [5]=Q6 value text, [6]=Q7 history+income
+  const q2TeamText   = userMessages[1]?.content ?? "";
+  const q3WeekText   = userMessages[2]?.content ?? "";
+  const q7IncomeText = userMessages[6]?.content ?? "";
 
-  // Martell's Buyback Rate: income / 2000 working hours per year
+  const alloc       = parseAllocation(session.messages);
+  const energy      = parseEnergy(session.messages);
+  const teamRoles   = parseTeamRoles(q2TeamText);
+  const annualIncome = parseIncome(q7IncomeText) ?? 80_000;
+
+  // Martell Buyback Rate
   const buybackRate = annualIncome / 2_000;
-  // ¼ Rule: max hourly delegation cost should be ≤ 1/4 of buyback rate
   const quarterRate = buybackRate / 4;
 
-  const tasks = selectTasks(alloc, q1Answer, buybackRate);
+  const tasks = selectTasks(alloc, q3WeekText, energy, teamRoles, buybackRate);
   const totalHoursReclaimed = computeTotalReclaimed(alloc, tasks);
+  const elevateTier = computeElevateTier(buybackRate);
 
   const totalCost  = tasks.reduce((s, t) => s + t.estimatedCostPerMonth, 0);
-  const totalValue = tasks.reduce((s, t) => s + t.timeValuePerMonth, 0);
   const top3Cost   = tasks.slice(0, 3).reduce((s, t) => s + t.estimatedCostPerMonth, 0);
-  const overallRoi = Math.round(buybackRate / (totalCost / tasks.reduce((s, t) => s + t.hoursPerWeek * 4, 0) || 1));
+  const totalValue = tasks.reduce((s, t) => s + t.timeValuePerMonth, 0);
+  const overallRoi = Math.round(totalValue / (totalCost || 1));
 
   const report = {
     sessionId: session.sessionId,
@@ -567,6 +653,7 @@ router.post("/conversation/:sessionId/analyze", (req, res) => {
     annualIncome,
     buybackRate: Math.round(buybackRate),
     quarterRate: Math.round(quarterRate),
+    elevateTier,
     tasks,
     summary: `Based on what you shared, you're spending roughly ${totalHoursReclaimed} hours a week on work that doesn't need to be yours. At your Buyback Rate of $${Math.round(buybackRate)}/hr, that's $${(totalHoursReclaimed * 4 * Math.round(buybackRate)).toLocaleString()}/month in time cost. Delegating the top three items would run about $${top3Cost.toLocaleString()}/month — an immediate ${overallRoi}x return.`,
     nextStep:

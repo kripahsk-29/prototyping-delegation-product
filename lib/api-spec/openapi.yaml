@@ -153,7 +153,7 @@ components:
           type: string
         type:
           type: string
-          enum: [text, allocation_form]
+          enum: [text, allocation_form, energy_form]
           default: text
       required:
         - id
@@ -210,6 +210,9 @@ components:
           type: string
         whyDelegate:
           type: string
+        whoTakesIt:
+          type: string
+          description: "Route + role: e.g. 'Existing team member: Ops Manager' or 'System: HoneyBook' or 'External hire: VA'"
       required:
         - rank
         - taskName
@@ -222,6 +225,7 @@ components:
         - timeValuePerMonth
         - roi
         - whyDelegate
+        - whoTakesIt
 
     DelegationReport:
       type: object
@@ -242,7 +246,10 @@ components:
           description: "Martell's 1/4 Rule: max hourly delegation cost (buybackRate / 4)"
         annualIncome:
           type: number
-          description: User-provided annual revenue or income
+          description: User-provided personal take-home or target income
+        elevateTier:
+          type: string
+          description: "Placeholder tier assignment (e.g. Starter, Growth, Scale) — pending Ashley definition"
         tasks:
           type: array
           items:

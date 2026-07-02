@@ -18,8 +18,10 @@ export interface DelegationReport {
   buybackRate?: number;
   /** Martell's 1/4 Rule: max hourly delegation cost (buybackRate / 4) */
   quarterRate?: number;
-  /** User-provided annual revenue or income */
+  /** User-provided personal take-home or target income */
   annualIncome?: number;
+  /** Placeholder tier assignment (e.g. Starter, Growth, Scale) — pending Ashley definition */
+  elevateTier?: string;
   tasks: DelegationTask[];
   summary: string;
   nextStep: string;

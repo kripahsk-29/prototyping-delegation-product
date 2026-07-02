@@ -19,4 +19,6 @@ export interface DelegationTask {
   timeValuePerMonth: number;
   roi: string;
   whyDelegate: string;
+  /** Route + role: e.g. 'Existing team member: Ops Manager' or 'System: HoneyBook' or 'External hire: VA' */
+  whoTakesIt: string;
 }

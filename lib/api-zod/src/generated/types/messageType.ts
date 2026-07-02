@@ -12,4 +12,5 @@ export type MessageType = typeof MessageType[keyof typeof MessageType];
 export const MessageType = {
   text: 'text',
   allocation_form: 'allocation_form',
+  energy_form: 'energy_form',
 } as const;
