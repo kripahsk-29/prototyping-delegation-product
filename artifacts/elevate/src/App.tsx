@@ -14,6 +14,7 @@ import type {
 } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Send,
@@ -68,7 +69,10 @@ const ALLOC_ROWS = [
   { label: "Other", key: "other" },
 ];
 
-type AllocValues = Record<string, { current: string; desired: string }>;
+type AllocValues = Record<
+  string,
+  { current: string; desired: string; feels: number }
+>;
 
 function AllocationFormWidget({
   onSubmit,
@@ -77,7 +81,7 @@ function AllocationFormWidget({
 }) {
   const [values, setValues] = useState<AllocValues>(() =>
     Object.fromEntries(
-      ALLOC_ROWS.map((r) => [r.key, { current: "", desired: "" }])
+      ALLOC_ROWS.map((r) => [r.key, { current: "", desired: "", feels: 3 }])
     )
   );
   const [otherLabel, setOtherLabel] = useState("");
@@ -108,20 +112,38 @@ function AllocationFormWidget({
     }));
   };
 
+  const handleFeelsChange = (key: string, val: number) => {
+    setValues((prev) => ({
+      ...prev,
+      [key]: { ...prev[key], feels: val },
+    }));
+  };
+
   const handleSubmit = () => {
     if (!canSubmit) return;
 
-    const fmt = (col: "current" | "desired") =>
+    const included = (i: number) =>
+      (parseInt(values[ALLOC_ROWS[i].key].current) || 0) +
+        (parseInt(values[ALLOC_ROWS[i].key].desired) || 0) >
+      0;
+
+    const labelFor = (r: (typeof ALLOC_ROWS)[number]) =>
+      r.key === "other" && otherLabel.trim() ? otherLabel.trim() : r.label;
+
+    const fmtPct = (col: "current" | "desired") =>
       ALLOC_ROWS.map((r) => {
-        const label =
-          r.key === "other" && otherLabel.trim() ? otherLabel.trim() : r.label;
         const pct = parseInt(values[r.key][col]) || 0;
-        return `${label} ${pct}%`;
+        return `${labelFor(r)} ${pct}%`;
       })
-        .filter((_, i) => (parseInt(values[ALLOC_ROWS[i].key].current) || 0) + (parseInt(values[ALLOC_ROWS[i].key].desired) || 0) > 0)
+        .filter((_, i) => included(i))
         .join(", ");
 
-    const formatted = `Currently spending: ${fmt("current")}. Would like to spend: ${fmt("desired")}.`;
+    const fmtFeels = () =>
+      ALLOC_ROWS.map((r) => `${labelFor(r)}: ${values[r.key].feels}`)
+        .filter((_, i) => included(i))
+        .join(", ");
+
+    const formatted = `Currently spending: ${fmtPct("current")}. Would like to spend: ${fmtPct("desired")}. Feels — ${fmtFeels()}.`;
     setSubmitted(true);
     onSubmit(formatted);
   };
@@ -130,7 +152,7 @@ function AllocationFormWidget({
     return (
       <div className="flex items-center gap-2 text-primary text-sm font-medium mt-2 px-1">
         <Check className="w-4 h-4" />
-        Allocation submitted
+        Time & energy submitted
       </div>
     );
   }
@@ -138,13 +160,17 @@ function AllocationFormWidget({
   return (
     <div className="mt-3 bg-background border border-border/60 rounded-2xl overflow-hidden shadow-sm">
       {/* Header row */}
-      <div className="grid grid-cols-[1fr_90px_90px] gap-2 px-4 py-3 bg-muted/60 border-b border-border/40">
+      <div className="grid grid-cols-[1fr_76px_76px_160px] gap-2 px-4 py-3 bg-muted/60 border-b border-border/40">
         <div className="text-xs font-medium text-muted-foreground" />
         <div className="text-xs font-medium text-muted-foreground text-center leading-tight">
           Currently<br />spend (%)
         </div>
         <div className="text-xs font-medium text-muted-foreground text-center leading-tight">
           Would like<br />to spend (%)
+        </div>
+        <div className="text-xs font-medium text-muted-foreground text-center leading-tight">
+          How it feels<br />
+          <span className="font-normal">(1 not good – 5 best)</span>
         </div>
       </div>
 
@@ -153,7 +179,7 @@ function AllocationFormWidget({
         {ALLOC_ROWS.map((row) => (
           <div
             key={row.key}
-            className="grid grid-cols-[1fr_90px_90px] gap-2 items-center px-4 py-2.5"
+            className="grid grid-cols-[1fr_76px_76px_160px] gap-2 items-center px-4 py-2.5"
           >
             <div className="flex flex-col gap-1">
               <span className="text-sm text-foreground/80">{row.label}</span>
@@ -184,12 +210,31 @@ function AllocationFormWidget({
               placeholder="0"
               className="w-full text-center text-sm border border-border/50 rounded-lg h-8 bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
             />
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-muted-foreground" title="Not good">
+                1
+              </span>
+              <Slider
+                value={[values[row.key].feels]}
+                onValueChange={([v]) => handleFeelsChange(row.key, v)}
+                min={1}
+                max={5}
+                step={1}
+                className="flex-1"
+              />
+              <span className="text-[10px] text-muted-foreground" title="Best">
+                5
+              </span>
+              <span className="text-xs font-semibold text-primary w-3 text-center">
+                {values[row.key].feels}
+              </span>
+            </div>
           </div>
         ))}
       </div>
 
       {/* Totals */}
-      <div className="grid grid-cols-[1fr_90px_90px] gap-2 items-center px-4 py-3 bg-muted/40 border-t border-border/40">
+      <div className="grid grid-cols-[1fr_76px_76px_160px] gap-2 items-center px-4 py-3 bg-muted/40 border-t border-border/40">
         <span className="text-xs font-semibold text-foreground/70 uppercase tracking-wide">
           Total
         </span>
@@ -217,119 +262,19 @@ function AllocationFormWidget({
         >
           {sumDesired}%
         </div>
+        <div />
       </div>
 
       {/* Hint + submit */}
       <div className="px-4 py-3 flex items-center justify-between gap-3 border-t border-border/40">
         <p className="text-xs text-muted-foreground">
           {!currentOk || !desiredOk
-            ? "Both columns must add up to 100%"
+            ? "Both percentage columns must add up to 100%"
             : "Ready to submit"}
         </p>
         <Button
           onClick={handleSubmit}
           disabled={!canSubmit}
-          size="sm"
-          className="rounded-full px-5 bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-40"
-        >
-          Submit
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-// ── Energy form widget ───────────────────────────────────────────────────────
-
-const ENERGY_ROWS = [
-  { label: "Day-to-day Operations", key: "ops",           submitLabel: "Operations" },
-  { label: "Business Strategy",      key: "strategy",     submitLabel: "Strategy" },
-  { label: "Relationships & Partnerships", key: "relationships", submitLabel: "Relationships" },
-  { label: "Sales",                  key: "sales",        submitLabel: "Sales" },
-  { label: "Finance / Accounting",   key: "finance",      submitLabel: "Finance" },
-];
-
-const ENERGY_COLORS = [
-  { bg: "bg-red-400",    text: "text-white",       label: "Drains me" },
-  { bg: "bg-orange-300", text: "text-orange-900",  label: "" },
-  { bg: "bg-[#e8e4d4]", text: "text-foreground",  label: "Neutral" },
-  { bg: "bg-green-200",  text: "text-green-900",   label: "" },
-  { bg: "bg-green-500",  text: "text-white",       label: "Energizes me" },
-];
-
-function EnergyFormWidget({ onSubmit }: { onSubmit: (formatted: string) => void }) {
-  const [ratings, setRatings] = useState<Record<string, number>>({});
-  const [submitted, setSubmitted] = useState(false);
-
-  const allRated = ENERGY_ROWS.every((r) => ratings[r.key] !== undefined);
-
-  const handleSubmit = () => {
-    if (!allRated || submitted) return;
-    const parts = ENERGY_ROWS.map((r) => `${r.submitLabel}: ${ratings[r.key]}`).join(", ");
-    const formatted = `Energy ratings — ${parts}`;
-    setSubmitted(true);
-    onSubmit(formatted);
-  };
-
-  if (submitted) {
-    return (
-      <div className="flex items-center gap-2 text-primary text-sm font-medium mt-2 px-1">
-        <Check className="w-4 h-4" />
-        Energy ratings submitted
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-3 bg-background border border-border/60 rounded-2xl overflow-hidden shadow-sm">
-      {/* Legend */}
-      <div className="flex items-center justify-between px-4 py-3 bg-muted/60 border-b border-border/40">
-        <span className="text-xs font-medium text-muted-foreground">Area</span>
-        <div className="flex items-center gap-1 text-xs text-muted-foreground">
-          <span className="text-red-500 font-medium">1 — Drains me</span>
-          <span className="mx-2 text-border">·</span>
-          <span className="text-green-600 font-medium">5 — Energizes me</span>
-        </div>
-      </div>
-
-      {/* Rows */}
-      <div className="divide-y divide-border/30">
-        {ENERGY_ROWS.map((row) => (
-          <div key={row.key} className="flex items-center gap-3 px-4 py-3">
-            <span className="text-sm text-foreground/80 flex-1 min-w-0">{row.label}</span>
-            <div className="flex gap-1.5 shrink-0">
-              {ENERGY_COLORS.map((c, i) => {
-                const val = i + 1;
-                const selected = ratings[row.key] === val;
-                return (
-                  <button
-                    key={val}
-                    onClick={() => setRatings((prev) => ({ ...prev, [row.key]: val }))}
-                    className={cn(
-                      "w-8 h-8 rounded-full text-xs font-semibold transition-all duration-150 border-2",
-                      selected
-                        ? `${c.bg} ${c.text} border-transparent scale-110 shadow-md`
-                        : "bg-muted/40 text-muted-foreground border-transparent hover:border-border hover:scale-105"
-                    )}
-                    title={c.label || String(val)}
-                  >
-                    {val}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Submit */}
-      <div className="px-4 py-3 flex items-center justify-between gap-3 border-t border-border/40">
-        <p className="text-xs text-muted-foreground">
-          {allRated ? "All areas rated — ready to submit" : `Rate all ${ENERGY_ROWS.length} areas to continue`}
-        </p>
-        <Button
-          onClick={handleSubmit}
-          disabled={!allRated}
           size="sm"
           className="rounded-full px-5 bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-40"
         >
@@ -1059,7 +1004,7 @@ function ElevateApp() {
                         {formAlreadySubmitted ? (
                           <div className="flex items-center gap-2 text-primary text-sm font-medium mt-2 px-1">
                             <Check className="w-4 h-4" />
-                            Allocation submitted
+                            Time & energy submitted
                           </div>
                         ) : (
                           <AllocationFormWidget

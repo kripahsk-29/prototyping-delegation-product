@@ -26,10 +26,10 @@ interface QuestionDef {
 
 const sessions = new Map<string, Session>();
 
-// 7 questions following the v1 spec:
+// 6 questions following the v2 spec:
 // Q1: Business context  Q2: Existing team  Q3: Week tasks (text)
-// Q4: Time per task (allocation_form)  Q5: Energy (energy_form)
-// Q6: Value (text)  Q7: History + take-home income (text)
+// Q4: Time per task + energy (allocation_form)
+// Q5: Value (text)  Q6: History + take-home income (text)
 const QUESTIONS: QuestionDef[] = [
   {
     content:
@@ -48,13 +48,8 @@ const QUESTIONS: QuestionDef[] = [
   },
   {
     content:
-      "For each area below, roughly how much of your time do you currently spend on it — and how much would you like to spend? Both columns must add up to 100%.",
+      "For each area below, roughly how much of your time do you currently spend on it, how much would you like to spend, and — on a scale of 1 (not good) to 5 (best) — how does it feel? Both percentage columns must add up to 100%.",
     msgType: "allocation_form",
-  },
-  {
-    content:
-      "Now for the same areas — on a scale of 1 to 5, how do these feel? 1 means it drains you completely. 5 means it genuinely energizes you.",
-    msgType: "energy_form",
   },
   {
     content:
@@ -93,20 +88,18 @@ function buildNextMessage(
     1: () => `Good context — that helps a lot.\n\n${nextQ.content}`,
     // After Q2 (team) → Q3 (week tasks)
     2: () => `Got it — knowing who's already there changes everything.\n\n${nextQ.content}`,
-    // After Q3 (week) → Q4 (allocation form)
+    // After Q3 (week) → Q4 (allocation + energy form)
     3: () => {
       const wc = userAnswer.trim().split(/\s+/).length;
       const opener = wc > 40
         ? "That's a full plate — and a clear picture of where your time is going."
         : "That's useful — I can already see some patterns there.";
-      return `${opener}\n\nNow let's put some numbers on it:`;
+      return `${opener}\n\nNow let's put some numbers on it — and how each one feels:`;
     },
-    // After Q4 (allocation) → Q5 (energy form)
-    4: () => `That time breakdown is really telling. Now I want to understand how these areas actually feel:`,
-    // After Q5 (energy) → Q6 (value)
-    5: () => `That energy map is really valuable data. One more angle:\n\n${nextQ.content}`,
-    // After Q6 (value) → Q7 (history + income)
-    6: () => `That distinction — what only you can do versus what anyone could — is exactly what shapes the plan.\n\n${nextQ.content}`,
+    // After Q4 (allocation + energy) → Q5 (value)
+    4: () => `That time and energy breakdown is really telling. One more angle:\n\n${nextQ.content}`,
+    // After Q5 (value) → Q6 (history + income)
+    5: () => `That distinction — what only you can do versus what anyone could — is exactly what shapes the plan.\n\n${nextQ.content}`,
   };
 
   const bridge = bridges[nextIdx];
@@ -165,11 +158,11 @@ function parseAllocation(messages: Message[]): Allocation | null {
   return { current: extract(currentPart), desired: extract(desiredPart) };
 }
 
-// Parse energy scores from the energy_form submission
-// Format: "Energy ratings — Operations: 2, Strategy: 5, Relationships: 4, Sales: 3, Finance: 1"
+// Parse energy scores from the allocation_form submission's "Feels" segment
+// Format: "... Feels — Handling day-to-day operations: 2, Business strategy: 5, ..."
 function parseEnergy(messages: Message[]): Record<string, number> {
   const msg = messages.find(
-    (m) => m.role === "user" && m.content.includes("Energy ratings")
+    (m) => m.role === "user" && m.content.includes("Feels —")
   );
   if (!msg) return {};
   const result: Record<string, number> = {};
@@ -621,16 +614,16 @@ router.post("/conversation/:sessionId/analyze", (req, res) => {
 
   const userMessages = session.messages.filter((m) => m.role === "user");
   // userMessages: [0]=Q1 context, [1]=Q2 team, [2]=Q3 week,
-  //               [3]=Q4 allocation form, [4]=Q5 energy form,
-  //               [5]=Q6 value text, [6]=Q7 history+income
+  //               [3]=Q4 allocation + energy form,
+  //               [4]=Q5 value text, [5]=Q6 history+income
   const q2TeamText   = userMessages[1]?.content ?? "";
   const q3WeekText   = userMessages[2]?.content ?? "";
-  const q7IncomeText = userMessages[6]?.content ?? "";
+  const q6IncomeText = userMessages[5]?.content ?? "";
 
   const alloc       = parseAllocation(session.messages);
   const energy      = parseEnergy(session.messages);
   const teamRoles   = parseTeamRoles(q2TeamText);
-  const annualIncome = parseIncome(q7IncomeText) ?? 80_000;
+  const annualIncome = parseIncome(q6IncomeText) ?? 80_000;
 
   // Martell Buyback Rate
   const buybackRate = annualIncome / 2_000;
