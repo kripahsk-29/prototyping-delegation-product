@@ -35,11 +35,6 @@ Open **http://localhost:5173**. The frontend proxies `/api` requests to the API 
 
 > The prototype's conversation logic runs entirely in-memory on the API server — no database or external AI API key is required to run it locally. `@workspace/db` (Postgres/Drizzle) is scaffolded in the workspace for the production build but isn't wired into this prototype.
 
-## Other useful commands
-
-- `pnpm run typecheck` — typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 
 ## Where things live
 
