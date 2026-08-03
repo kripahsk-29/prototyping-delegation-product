@@ -1,19 +1,17 @@
-# Elevate — Delegation Intelligence
+# Elevate - Delegation Prototype
 
 A prototype built for Elevate's first AI-powered product: a conversational tool that helps small-business owners figure out not just *what* to delegate, but *how* and *where*. Users talk through how they spend their time, and the app turns that into a concrete delegation plan — a time breakdown, ranked tasks to hand off, a 90-day roadmap, and a "buyback rate" for what their time is actually worth.
 
 ## Background
 
-This summer at Elevate, I was in charge of prototyping and presenting to 15+ stakeholders, then turning that feedback into decisions about what the final product should be — which features to build, which to cut. I took the market research I'd done and translated it into a visual, testable prototype, built in Replit with Claude Code so I could get something fast in front of users and keep iterating toward the real product. My teammate led the core AI; I focused on building out the backend.
+This summer at Elevate, I was in charge of prototyping and presenting to 15+ stakeholders, then turning that feedback into decisions about what the final product should be — which features to build, which to cut. I took the market research I'd done and translated it into a visual, testable prototype, built in Replit as well as Claude Code so I could get something fast in front of users and keep iterating toward the real product. 
 
-## Stack
+In addition, the main parts of our project included: my teammate leading the core AI + frontend, while I focused on building out the backend + security layer.
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- **Frontend** (`artifacts/elevate`): React 19, Vite, Tailwind, shadcn/ui, TanStack Query, Recharts
-- **API** (`artifacts/api-server`): Express 5
-- **Shared libs** (`lib/`): typed API contracts (OpenAPI + Orval codegen), Zod schemas, React Query hooks, Drizzle/Postgres layer (not required for this prototype — see below)
+I learned a lot through this project, and it was really fun to see how AI can speed up the building journey, specifically for prototyping. Turning that into conversations where I had to translate business requirements into technical decisions taught me how to filter out necessary features based on time, client value, and what would help actually move Elevate forward!
 
-## Running it locally
+
+## How to run: 
 
 ### 1. Install dependencies
 
